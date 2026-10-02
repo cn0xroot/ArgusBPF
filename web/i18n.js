@@ -155,7 +155,7 @@
     'alerts.thRule': ['规则', 'Rule'],
 
     'gloss.title': ['知识库', 'Glossary'],
-    'gloss.intro.plain': ['看不懂的术语都在这里，用大白话解释。', 'Every confusing term, explained in plain language.'],
+    'gloss.intro.plain': ['看不懂的术语都在这里，用通俗易懂的语言解释。', 'Every confusing term, explained in plain language.'],
     'gloss.intro.pro': ['术语表：通俗解释 + 技术定义。', 'Glossary: plain explanation + technical definition.'],
     'gloss.qph': ['搜索术语', 'Search terms'],
     'gloss.all': ['全部', 'All'],

@@ -1,6 +1,6 @@
 // Package explain turns an enriched event.Event into a professional
 // one-liner (syscall-like form) and a plain-language explanation with an
-// everyday analogy — the "小白模式 / 专业模式" pair described in DESIGN.md —
+// everyday analogy — the "通俗模式 / 专业模式" pair described in DESIGN.md —
 // in both Chinese and English, so the web UI's language toggle has real
 // bilingual text to switch between instead of just translating its own
 // chrome. It is pure template/lookup logic, no LLM involved, so it works

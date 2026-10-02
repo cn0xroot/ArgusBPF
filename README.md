@@ -2,21 +2,21 @@
 
 *[中文说明](README.zh-CN.md)*
 
-**The thousand-eyed watchman for your machine: see what your OS — and every AI coding agent running on it — is actually doing, via eBPF, explained in plain language instead of syscall jargon.**
+**See what your OS — and every AI coding agent running on it — is actually doing, via eBPF, explained in plain language instead of syscall jargon.**
 
-*Argus Panoptes, "the all-seeing," never slept: a hundred eyes, watching everything at once. ArgusBPF borrows the name for the same reason — it watches the kernel directly (**BPF**) and knows what to look for when the thing doing the looking is an **AI agent CLI**, not just another process.*
+The name borrows from Argus, the many-eyed watchman of Greek myth, for what the tool actually does: hook the kernel directly (eBPF) while also recognizing when the activity it's watching belongs to an AI agent CLI specifically.
 
-ArgusBPF is a single Go binary. On Linux/amd64 running as root it hooks the kernel directly via **eBPF** (CO-RE, no kernel headers needed at runtime); everywhere else (other OSes, other architectures, no root) it falls back automatically to a cross-platform polling collector built on [gopsutil](https://github.com/shirou/gopsutil). Either way you get a web UI with a **Professional mode** (syscall forms, memory addresses, sector numbers, raw fields) and a **Plain-language mode** (short, everyday explanations and analogies for exactly the same events) that you can toggle at any time.
+ArgusBPF is a single Go binary. On Linux/amd64 running as root it hooks the kernel directly via **eBPF** (CO-RE, no kernel headers needed at runtime); everywhere else (other OSes, other architectures, no root) it falls back automatically to a cross-platform polling collector built on [gopsutil](https://github.com/shirou/gopsutil). The web UI lets you toggle between **Professional mode** (syscall forms, memory addresses, sector numbers, raw fields) and **Plain-language mode** (the same events explained in everyday language with analogies).
 
-It's the same idea as tools like [CC-Monitor](https://github.com/) that watch what an AI coding agent does to your machine — applied to the operating system itself, and extended to recognize *which* AI agent CLI is doing it.
+It's the same idea as tools like [CC-Monitor](https://github.com/) that watch what an AI coding agent does to your machine, applied to the operating system itself, and extended to recognize which AI agent CLI is doing it.
 
-## Highlights
+## Design
 
-- 🔬 **eBPF-native, not strace-wrapped.** A single CO-RE program (`bpf/monitor.c`) hangs off `raw_syscalls/sys_enter` plus the `module_load`/`block_rq_issue` tracepoints — one kernel-side dispatcher, not one traced process at a time, no ptrace overhead, and it keeps working across kernel versions without rebuilding (no kernel headers needed at runtime).
-- 🤖 **Knows an AI agent when it sees one.** 10 mainstream AI coding-agent CLIs are recognized by process identity (not guesswork) and get their own dimension everywhere: a feed badge, a filterable `agent` field, and a dedicated timeline lane — see what Claude Code/Codex/etc. actually touched on the box, apart from everything else.
-- 🔓 **Sees through TLS, not just around it.** eCapture-style uprobes on `SSL_read`/`SSL_write`/`getaddrinfo`/`exec_simple_query` recover plaintext DNS/TLS/SQL *in the target process's own memory*, before/after encryption — no MITM proxy, no cert games.
-- 🗣️ **Every event, two languages.** Not a "simple mode" that hides columns — the same event gets a real syscall-form professional rendering *and* a separately generated plain-language explanation with an everyday analogy, toggleable instantly, powered by an offline template/lookup engine (zero LLM calls, fully deterministic, works with no network at all).
-- 📦 **One binary, every OS.** Pure Go, no CGO anywhere (SQLite included). Root + Linux/amd64 gets the full eBPF pipeline; anywhere else — other OS, other arch, no root — it transparently drops to a gopsutil-based poller instead of refusing to run.
+- **A single kernel-side dispatcher, not per-process ptrace.** One CO-RE program (`bpf/monitor.c`) hangs off `raw_syscalls/sys_enter` plus the `module_load`/`block_rq_issue` tracepoints, covering every process system-wide without the per-process attach overhead ptrace has, and keeps working across kernel versions without rebuilding (no kernel headers needed at runtime).
+- **AI agents recognized by process identity.** 10 mainstream AI coding-agent CLIs are matched against a built-in table; recognized events carry an `agent` field, show a badge in the live feed, and get a dedicated timeline lane so you can see what one agent actually touched.
+- **TLS/DNS/SQL plaintext capture.** eCapture-style uprobes on `SSL_read`/`SSL_write`/`getaddrinfo`/`exec_simple_query` recover plaintext in the target process's own memory, before/after encryption, with no MITM proxy or certificate handling needed.
+- **Two renderings per event.** Every event gets a real syscall-form professional rendering and a separately generated plain-language explanation with an everyday analogy, produced by an offline template/lookup engine (no LLM calls, fully deterministic, works with no network at all).
+- **One binary, cross-platform.** Pure Go, no CGO anywhere (SQLite included). Root + Linux/amd64 gets the full eBPF pipeline; any other OS, architecture, or no root falls back to a gopsutil-based poller.
 
 ## Features
 
@@ -101,4 +101,4 @@ collector (eBPF | poller) -> pipeline (rules + explain + 1s aggregation) -> SQLi
 - MySQL `dispatch_command` SQL capture isn't implemented — its argument layout is too version-fragile to ship safely; Postgres (`exec_simple_query`, a stable single-`char*` signature) is.
 - No `bash readline` command-audit uprobe yet.
 - Inbound connections (`accept`) aren't individually captured by the eBPF path; the disk page's "top files by IO" has no data source yet (only per-process IO and the sector scatter plot).
-- No systemd unit is installed by `install.sh` yet — it just places the binary and optionally runs it once.
+- Distro-packaged Postgres binaries are typically LTO-built and stripped, so `exec_simple_query` isn't attachable by name; `install.sh`'s uprobe logic falls back to resolving its address from a matching `-dbgsym` debug package when one is installed, and that capability is simply unavailable without it.

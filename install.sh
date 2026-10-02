@@ -90,8 +90,15 @@ User=root
 WantedBy=multi-user.target
 EOF
 	systemctl daemon-reload
-	systemctl enable --now argusbpf.service
-	say "Started. Check status with: systemctl status argusbpf"
+	systemctl enable argusbpf.service
+	# `enable --now` only starts a service that isn't already running — it
+	# will NOT restart one that's already active, so re-running this
+	# script to pick up a rebuilt binary would silently keep the old
+	# process (and its old in-memory binary image) running forever.
+	# restart() does the right thing either way: starts it fresh, or
+	# replaces an already-running instance with the one just installed.
+	systemctl restart argusbpf.service
+	say "Started (or restarted). Check status with: systemctl status argusbpf"
 	sayzh "已启动。可用以下命令查看状态：systemctl status argusbpf"
 else
 	say ""
