@@ -72,10 +72,10 @@
   }
   function fmtAgo(ms) {
     var s = Math.floor((Date.now() - ms) / 1000);
-    if (s < 60) return s + ' 秒前';
-    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
-    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
-    return Math.floor(s / 86400) + ' 天前';
+    if (s < 60) return I18N.t('time.secAgo').replace('{n}', s);
+    if (s < 3600) return I18N.t('time.minAgo').replace('{n}', Math.floor(s / 60));
+    if (s < 86400) return I18N.t('time.hourAgo').replace('{n}', Math.floor(s / 3600));
+    return I18N.t('time.dayAgo').replace('{n}', Math.floor(s / 86400));
   }
   function qs(obj) {
     var parts = [];
@@ -268,7 +268,12 @@
       var l = I18N.lang();
       document.querySelectorAll('#langSeg button').forEach(function (b) { b.classList.toggle('on', b.dataset.lang === l); });
     }
-    I18N.apply(); // translate the static chrome to whatever language was saved, before first paint
+    // ?lang=zh|en overrides the saved preference for this load (doesn't
+    // persist it) — lets a link or a screenshot tool force a language
+    // without touching the viewer's own saved setting.
+    var qLang = new URLSearchParams(location.search).get('lang');
+    if (qLang === 'en' || qLang === 'zh') I18N.setLang(qLang, false);
+    I18N.apply(); // translate the static chrome to whatever language is active, before first paint
     paintLangSeg();
     document.getElementById('langSeg').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-lang]'); if (b) I18N.setLang(b.dataset.lang);
@@ -287,6 +292,15 @@
       if (glossaryRebuildCats) glossaryRebuildCats();
       if (glossaryRender) glossaryRender();
       renderOverviewAlerts();
+      repaintDot();
+      // Chart series labels are set once at construction (initOverview),
+      // not re-read per draw, so a language change needs to poke them
+      // directly before the next repaint picks it up.
+      if (charts.mem) { charts.mem.o.series[0].label = I18N.t('chart.used'); charts.mem.draw(); }
+      if (charts.disk) { charts.disk.o.series[0].label = I18N.t('chart.read'); charts.disk.o.series[1].label = I18N.t('chart.write'); charts.disk.draw(); }
+      if (charts.net) { charts.net.o.series[0].label = I18N.t('chart.rx'); charts.net.o.series[1].label = I18N.t('chart.tx'); charts.net.draw(); }
+      if (charts.rate) { charts.rate.o.series[0].label = I18N.t('chart.evPerSec'); charts.rate.draw(); }
+      loadHostInfo();
       refreshCurrent(true);
     });
     document.getElementById('drClose').addEventListener('click', closeDrawer);
@@ -357,8 +371,8 @@
     var url = proto + location.host + '/ws' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
     var ws;
     try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
-    ws.onopen = function () { backoff = 1000; setDot('ok', '已连接'); };
-    ws.onclose = function () { setDot('bad', '连接已断开，重试中…'); scheduleReconnect(); };
+    ws.onopen = function () { backoff = 1000; setDot('ok', I18N.t('top.connected')); };
+    ws.onclose = function () { setDot('bad', I18N.t('top.disconnected')); scheduleReconnect(); };
     ws.onerror = function () { ws.close(); };
     ws.onmessage = function (ev) {
       var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
@@ -367,7 +381,12 @@
     };
   }
   function scheduleReconnect() { setTimeout(connect, backoff); backoff = Math.min(backoff * 1.6, 15000); }
-  function setDot(cls, txt) { if (wsDot) { wsDot.className = 'dot ' + cls; } if (wsTxt) wsTxt.textContent = txt; }
+  var lastDotCls = null;
+  function setDot(cls, txt) { lastDotCls = cls; if (wsDot) { wsDot.className = 'dot ' + cls; } if (wsTxt) wsTxt.textContent = txt; }
+  function repaintDot() {
+    if (!lastDotCls) return;
+    setDot(lastDotCls, lastDotCls === 'ok' ? I18N.t('top.connected') : I18N.t('top.disconnected'));
+  }
 
   function onLiveEvents(events) {
     events.forEach(function (ev) { EV.set(ev.id, ev); });
@@ -389,7 +408,7 @@
     while (tbody.rows.length > 2000) tbody.deleteRow(tbody.rows.length - 1);
     liveEvents = liveEvents.slice(0, 2000);
     document.getElementById('liveEmpty').style.display = tbody.rows.length ? 'none' : '';
-    document.getElementById('liveCount').textContent = tbody.rows.length + ' 条';
+    document.getElementById('liveCount').textContent = I18N.t('unit.entries').replace('{n}', tbody.rows.length);
     if (autoScroll) {
       wrap.scrollTop = 0;
     } else {
@@ -417,19 +436,29 @@
     updateOverviewHeader(snap);
   }
 
+  var lastHostInfo = null;
+  function loadHostInfo() {
+    if (lastHostInfo) { paintHostInfo(lastHostInfo); return; }
+    api('/api/info').then(function (info) {
+      lastHostInfo = info;
+      paintHostInfo(info);
+    }).catch(function () {});
+  }
+  function paintHostInfo(info) {
+    document.getElementById('hostInfo').textContent = info.host + ' · ' + info.os + ' ' + (info.kernel || '') + ' · ' + info.arch + ' · ' + (info.backend === 'ebpf' ? I18N.t('top.backendEbpf') : I18N.t('top.backendPoll'));
+    if (info.warnings && info.warnings.length) {
+      var w = document.getElementById('warnBar'); w.textContent = '⚠ ' + info.warnings.join('；'); w.classList.add('show');
+    }
+  }
+
   // ---------------- OVERVIEW ----------------
   function initOverview() {
     charts.cpu = new Charts.LineChart(document.getElementById('chCpu'), { series: [{ key: 'v', color: 'var(--accent-2)', label: 'CPU' }], max: 100, fmt: fmtPct, legend: document.getElementById('legCpu') });
-    charts.mem = new Charts.LineChart(document.getElementById('chMem'), { series: [{ key: 'used', color: 'var(--accent)', label: '已用' }], fmt: fmtBytes, legend: document.getElementById('legMem') });
-    charts.disk = new Charts.LineChart(document.getElementById('chDisk'), { series: [{ key: 'r', color: 'var(--cyan)', label: '读' }, { key: 'w', color: 'var(--cat-disk)', label: '写' }], fmt: fmtBps, legend: document.getElementById('legDisk') });
-    charts.net = new Charts.LineChart(document.getElementById('chNet'), { series: [{ key: 'rx', color: 'var(--green)', label: '收' }, { key: 'tx', color: 'var(--accent-2)', label: '发' }], fmt: fmtBps, legend: document.getElementById('legNet') });
-    charts.rate = new Charts.LineChart(document.getElementById('chRate'), { series: [{ key: 'v', color: 'var(--accent)', label: '事件/s' }], fmt: function (v) { return v.toFixed(0); }, legend: document.getElementById('legRate') });
-    api('/api/info').then(function (info) {
-      document.getElementById('hostInfo').textContent = info.host + ' · ' + info.os + ' ' + (info.kernel || '') + ' · ' + info.arch + ' · ' + (info.backend === 'ebpf' ? 'eBPF 采集' : '轮询采集');
-      if (info.warnings && info.warnings.length) {
-        var w = document.getElementById('warnBar'); w.textContent = '⚠ ' + info.warnings.join('；'); w.classList.add('show');
-      }
-    }).catch(function () {});
+    charts.mem = new Charts.LineChart(document.getElementById('chMem'), { series: [{ key: 'used', color: 'var(--accent)', label: I18N.t('chart.used') }], fmt: fmtBytes, legend: document.getElementById('legMem') });
+    charts.disk = new Charts.LineChart(document.getElementById('chDisk'), { series: [{ key: 'r', color: 'var(--cyan)', label: I18N.t('chart.read') }, { key: 'w', color: 'var(--cat-disk)', label: I18N.t('chart.write') }], fmt: fmtBps, legend: document.getElementById('legDisk') });
+    charts.net = new Charts.LineChart(document.getElementById('chNet'), { series: [{ key: 'rx', color: 'var(--green)', label: I18N.t('chart.rx') }, { key: 'tx', color: 'var(--accent-2)', label: I18N.t('chart.tx') }], fmt: fmtBps, legend: document.getElementById('legNet') });
+    charts.rate = new Charts.LineChart(document.getElementById('chRate'), { series: [{ key: 'v', color: 'var(--accent)', label: I18N.t('chart.evPerSec') }], fmt: function (v) { return v.toFixed(0); }, legend: document.getElementById('legRate') });
+    loadHostInfo();
     api('/api/system/history').then(function (r) {
       (r.samples || []).forEach(pushOverviewPoint);
     }).catch(function () {});
@@ -474,7 +503,7 @@
         return '<div class="list-item"><span class="grow">' + esc(p.comm) + ' <span class="dim">#' + p.pid + '</span></span>' +
           '<div class="bar-bg" style="width:80px"><div class="bar-fg" style="width:' + (100 * p.count / maxN) + '%"></div></div>' +
           '<span class="dim" style="width:34px;text-align:right">' + p.count + '</span></div>';
-      }).join('') || '<div class="empty">暂无数据</div>';
+      }).join('') || '<div class="empty">' + I18N.t('empty.noData') + '</div>';
     }).catch(function () {});
     api('/api/events', { risk: 'medium+', limit: 8 }).then(function (r) {
       lastOverviewAlerts = r.events || [];
@@ -489,7 +518,7 @@
       EV.set(ev.id, ev);
       return '<div class="list-item click" data-id="' + ev.id + '"><span class="risk ' + ev.risk + '">' + riskLabel(ev.risk) + '</span>' +
         '<span class="grow">' + esc(evText(ev, 'rule_title') || evText(ev, 'plain') || evText(ev, 'title')) + '</span><span class="dim">' + fmtAgo(ev.ts) + '</span></div>';
-    }).join('') || '<div class="empty">暂无告警，一切正常</div>';
+    }).join('') || '<div class="empty">' + I18N.t('empty.noAlerts') + '</div>';
   }
   function maybeUpdateOverviewAlerts(events) {
     var risky = events.filter(function (e) { return e.risk === 'medium' || e.risk === 'high'; });
@@ -564,7 +593,7 @@
         var evs = (r.events || []).filter(liveFilterMatch);
         document.getElementById('liveBody').insertAdjacentHTML('beforeend', evs.map(evRowHTML).join(''));
         liveEvents = liveEvents.concat(evs);
-        document.getElementById('liveCount').textContent = liveEvents.length + ' 条';
+        document.getElementById('liveCount').textContent = I18N.t('unit.entries').replace('{n}', liveEvents.length);
       }).catch(function () {});
     });
     refreshFns.live = function (force) { if (force) loadLive(true); };
@@ -575,7 +604,7 @@
     api('/api/events', { limit: 150 }).then(function (r) {
       liveEvents = (r.events || []).filter(liveFilterMatch);
       renderEvents(document.getElementById('liveBody'), liveEvents, document.getElementById('liveEmpty'));
-      document.getElementById('liveCount').textContent = liveEvents.length + ' 条';
+      document.getElementById('liveCount').textContent = I18N.t('unit.entries').replace('{n}', liveEvents.length);
     }).catch(function () {});
   }
 
@@ -590,7 +619,7 @@
         else if (tlLaneMode === 'agent') params.agent = lane.name;
         else if (/^\d+$/.test(lane.name)) params.pid = lane.name;
         else params.q = lane.name;
-        document.getElementById('tlSelTitle').textContent = (lane.label || lane.name) + ' · ' + hit.b.n + ' 个事件';
+        document.getElementById('tlSelTitle').textContent = (lane.label || lane.name) + ' · ' + I18N.t('chart.eventsCount').replace('{n}', hit.b.n);
         document.getElementById('tlSelSub').textContent = new Date(hit.since).toLocaleTimeString() + ' – ' + new Date(hit.until).toLocaleTimeString();
         // #tlBox now caps/scrolls internally so "按进程" with many lanes
         // can't push this panel far down the page — but on a short
@@ -608,7 +637,13 @@
     });
     document.getElementById('tlRefresh').addEventListener('click', loadTimeline);
     function loadTimeline() {
-      api('/api/timeline', { range: state.range.sec, lane: tlLaneMode }).then(function (d) { tl.set(d); }).catch(function () {});
+      api('/api/timeline', { range: state.range.sec, lane: tlLaneMode }).then(function (d) {
+        // Category lane names come back as raw keys (file/process/net/...);
+        // the server can't know which language to render them in, so
+        // translate them here the same way the live-events table does.
+        if (tlLaneMode === 'cat' && d.lanes) d.lanes.forEach(function (l) { l.label = catLabel(l.name); });
+        tl.set(d);
+      }).catch(function () {});
     }
     refreshFns.timeline = loadTimeline;
     loadTimeline();
@@ -651,19 +686,19 @@
       if (q && (c.comm + ' ' + c.local + ' ' + c.remote + ' ' + (c.host || '')).toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
-    document.getElementById('netCount').textContent = rows.length + ' 条';
+    document.getElementById('netCount').textContent = I18N.t('unit.entries').replace('{n}', rows.length);
     document.getElementById('netBody').innerHTML = rows.map(function (c) {
       return '<tr><td class="nowrap">' + esc(c.proto) + '</td><td class="mono nowrap">' + esc(c.local) + '</td>' +
         '<td class="mono nowrap">' + esc(c.remote || '–') + (c.host ? '<div class="dim" style="font-size:11px">' + esc(c.host) + '</div>' : '') + '</td>' +
         '<td class="hide-sm">' + esc(c.state) + '</td><td class="nowrap">' + esc(c.comm || '') + ' <span class="dim">#' + c.pid + '</span></td>' +
-        '<td>' + (c.service ? '<span class="tag">' + esc(c.service) + '</span>' : '') + '</td></tr>';
-    }).join('') || '<tr><td colspan="6" class="empty">暂无连接</td></tr>';
+        '<td>' + (c.service ? '<span class="tag">' + esc(evText(c, 'service')) + '</span>' : '') + '</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="empty">' + I18N.t('empty.noConnections') + '</td></tr>';
   }
 
   // ---------------- DISK ----------------
   function initDisk() {
     document.getElementById('diskRefresh').addEventListener('click', loadDisk);
-    diskScatter = new Charts.Scatter(document.getElementById('diskScatter'), { yfmt: function (v) { return v.toExponential(1); }, empty: '暂无块设备 IO 采样' });
+    diskScatter = new Charts.Scatter(document.getElementById('diskScatter'), { yfmt: function (v) { return v.toExponential(1); }, empty: function () { return I18N.t('empty.noBlockIoSamples'); } });
     refreshFns.disk = loadDisk;
     loadDisk();
   }
@@ -673,7 +708,7 @@
       document.getElementById('diskCards').innerHTML = (d.devices || []).map(function (dev) {
         var c = dev.util > 80 ? 'var(--red)' : dev.util > 40 ? 'var(--yellow)' : 'var(--green)';
         return cardHTML({ label: dev.name, value: fmtBps(dev.read_bps + dev.write_bps), c: c, icon: 'disk' });
-      }).join('') || '<div class="empty">暂无磁盘设备</div>';
+      }).join('') || '<div class="empty">' + I18N.t('empty.noDiskDevices') + '</div>';
       var pts = (d.blocks || []).map(function (b) {
         var col = b.op === 'read' ? 'var(--cyan)' : b.op === 'write' ? 'var(--cat-disk)' : 'var(--yellow)';
         return { x: b.ts, y: b.sector, color: col, r: 2.2, tip: '<b>' + esc(b.dev) + '</b> sector ' + b.sector + '<div class="dim">' + esc(b.comm) + ' · ' + b.op + ' · len ' + b.len + '</div>' };
@@ -681,10 +716,10 @@
       diskScatter.set(pts);
       document.getElementById('diskFiles').innerHTML = (d.top_files || []).map(function (f) {
         return '<tr><td class="wrap mono">' + esc(f.path) + '</td><td class="hide-sm">' + esc(f.comm) + '</td><td class="num">' + fmtBytes(f.read_bytes) + '</td><td class="num">' + fmtBytes(f.write_bytes) + '</td><td class="num pro-only">' + f.ops + '</td></tr>';
-      }).join('') || '<tr><td colspan="5" class="empty">暂无数据</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="empty">' + I18N.t('empty.noData') + '</td></tr>';
       document.getElementById('diskProcs').innerHTML = (d.top_procs || []).map(function (p) {
         return '<tr><td class="num pro-only">' + p.pid + '</td><td>' + esc(p.comm) + '</td><td class="num">' + fmtBytes(p.read_bytes) + '</td><td class="num">' + fmtBytes(p.write_bytes) + '</td></tr>';
-      }).join('') || '<tr><td colspan="4" class="empty">暂无数据</td></tr>';
+      }).join('') || '<tr><td colspan="4" class="empty">' + I18N.t('empty.noData') + '</td></tr>';
     }).catch(function () {});
   }
 
@@ -717,10 +752,10 @@
   function renderMemSys(s) {
     var m = s.mem, free = Math.max(0, m.total - m.used - m.buffers - m.cached);
     var segs = [
-      { v: m.used - m.buffers - m.cached > 0 ? m.used - m.buffers - m.cached : m.used, c: 'var(--accent-2)', l: '已用' },
-      { v: m.buffers, c: 'var(--cyan)', l: '缓冲(buffers)' },
-      { v: m.cached, c: 'var(--green)', l: '缓存(cached)' },
-      { v: free, c: 'var(--bg-hover)', l: '空闲' },
+      { v: m.used - m.buffers - m.cached > 0 ? m.used - m.buffers - m.cached : m.used, c: 'var(--accent-2)', l: I18N.t('chart.used') },
+      { v: m.buffers, c: 'var(--cyan)', l: I18N.t('mem.buffers') },
+      { v: m.cached, c: 'var(--green)', l: I18N.t('mem.cached') },
+      { v: free, c: 'var(--bg-hover)', l: I18N.t('mem.free') },
     ];
     document.getElementById('memSysBar').innerHTML = segs.map(function (sg) { return '<div style="width:' + (100 * sg.v / m.total) + '%;background:' + sg.c + '"></div>'; }).join('');
     document.getElementById('memSysLegend').innerHTML = segs.map(function (sg) { return '<span><i style="background:' + sg.c + '"></i>' + sg.l + ' ' + fmtBytes(sg.v) + '</span>'; }).join('');
@@ -732,9 +767,9 @@
   function loadMemProc(pid) {
     api('/api/process/' + pid).then(function (d) {
       var p = d.proc;
-      document.getElementById('memProcTitle').textContent = '内存地图 — ' + p.comm + ' (pid ' + pid + ')';
+      document.getElementById('memProcTitle').textContent = I18N.t('mem.mapTitle') + p.comm + ' (pid ' + pid + ')';
       document.getElementById('memProcSub').textContent = 'RSS ' + fmtBytes(p.rss) + ' · VMS ' + fmtBytes(p.vms);
-      document.getElementById('memProcPlain').innerHTML = '<p class="page-intro plain-only">' + esc(p.comm) + ' 把自己的内存台面划分成了下面这些区域：</p>';
+      document.getElementById('memProcPlain').innerHTML = '<p class="page-intro plain-only">' + esc(I18N.t('mem.mapPlainDesc').replace('{name}', p.comm)) + '</p>';
       var summary = d.maps_summary || {};
       var total = Object.values(summary).reduce(function (a, b) { return a + b; }, 0) || 1;
       document.getElementById('memKindBar').innerHTML = Object.keys(summary).map(function (k) {
@@ -754,10 +789,10 @@
       }));
       document.getElementById('memMapPro').innerHTML = maps.map(function (m) {
         return '<tr><td class="mono nowrap">' + m.start + '-' + m.end + '</td><td class="num">' + fmtBytes(m.size) + '</td><td class="mono">' + esc(m.perms) + '</td><td class="mono">' + esc(m.offset) + '</td><td class="hide-sm mono">' + esc(m.dev) + '</td><td class="hide-sm">' + esc(m.inode) + '</td><td>' + esc(m.kind) + '</td><td class="wrap mono">' + esc(m.path) + '</td></tr>';
-      }).join('') || '<tr><td colspan="8" class="empty">该平台暂不支持内存地图</td></tr>';
+      }).join('') || '<tr><td colspan="8" class="empty">' + I18N.t('empty.memMapUnsupported') + '</td></tr>';
       document.getElementById('memMapPlain').innerHTML = maps.filter(function (m) { return m.size > 4096; }).slice(0, 150).map(function (m) {
         return '<div class="memmap-row"><span class="k"><i style="background:' + memkindColor(m.kind) + '"></i>' + esc(memkindLabel(m.kind)) + '</span><span class="desc">' + esc(evText(m, 'plain')) + '</span><span class="sz">' + fmtBytes(m.size) + '</span></div>';
-      }).join('') || '<div class="empty">该平台暂不支持内存地图</div>';
+      }).join('') || '<div class="empty">' + I18N.t('empty.memMapUnsupported') + '</div>';
     }).catch(function () {});
     api('/api/events', { cat: 'memory', pid: pid, limit: 50 }).then(function (r) { renderEvents(document.getElementById('memEvents'), r.events || []); }).catch(function () {});
   }
@@ -795,7 +830,7 @@
       html.push(procRowHTML(p, depth, hasKids));
       if (hasKids && !procCollapsed.has(p.pid)) byPpid[p.pid].forEach(function (c) { walk(c, depth + 1); });
     }
-    document.getElementById('procTree').innerHTML = html.join('') || '<div class="empty">暂无进程</div>';
+    document.getElementById('procTree').innerHTML = html.join('') || '<div class="empty">' + I18N.t('empty.noProcesses') + '</div>';
   }
   function procRowHTML(p, depth, hasKids) {
     var twist = hasKids ? (procCollapsed.has(p.pid) ? '▸' : '▾') : ' ';
@@ -811,7 +846,7 @@
   });
   function loadProcDetail(pid) {
     var el = document.getElementById('procDetail');
-    el.innerHTML = '<div class="empty">加载中…</div>';
+    el.innerHTML = '<div class="empty">' + I18N.t('empty.loading') + '</div>';
     api('/api/process/' + pid).then(function (d) {
       var p = d.proc;
       var fdKinds = {};
@@ -820,18 +855,18 @@
         '<h3 class="panel-header"><span>' + esc(p.comm) + ' <span class="dim">#' + pid + '</span></span></h3>' +
         '<div class="plain-box">' + esc(evText(d, 'plain')) + '</div>' +
         '<dl class="kv mt">' +
-        '<dt>命令行</dt><dd class="mono wrap">' + esc(p.cmdline || p.exe) + '</dd>' +
-        '<dt>用户</dt><dd>' + esc(p.user) + ' (uid ' + p.uid + ')</dd>' +
-        '<dt>状态</dt><dd>' + esc(p.state) + ' · ' + p.threads + ' 线程</dd>' +
-        '<dt>内存</dt><dd>RSS ' + fmtBytes(p.rss) + ' / VMS ' + fmtBytes(p.vms) + '</dd>' +
-        '<dt>磁盘 IO</dt><dd>读 ' + fmtBytes(d.io ? d.io.read_bytes : 0) + ' · 写 ' + fmtBytes(d.io ? d.io.write_bytes : 0) + '</dd>' +
-        '<dt>句柄</dt><dd>' + Object.keys(fdKinds).map(function (k) { return k + '×' + fdKinds[k]; }).join('，') + '</dd>' +
-        '<dt>网络连接</dt><dd>' + (d.conns || []).length + ' 个</dd>' +
+        '<dt>' + I18N.t('proc.cmdline') + '</dt><dd class="mono wrap">' + esc(p.cmdline || p.exe) + '</dd>' +
+        '<dt>' + I18N.t('drawer.user') + '</dt><dd>' + esc(p.user) + ' (uid ' + p.uid + ')</dd>' +
+        '<dt>' + I18N.t('th.state') + '</dt><dd>' + esc(p.state) + ' · ' + p.threads + I18N.t('proc.threadsSuffix') + '</dd>' +
+        '<dt>' + I18N.t('proc.memory') + '</dt><dd>RSS ' + fmtBytes(p.rss) + ' / VMS ' + fmtBytes(p.vms) + '</dd>' +
+        '<dt>' + I18N.t('proc.diskIo') + '</dt><dd>' + I18N.t('chart.read') + ' ' + fmtBytes(d.io ? d.io.read_bytes : 0) + ' · ' + I18N.t('chart.write') + ' ' + fmtBytes(d.io ? d.io.write_bytes : 0) + '</dd>' +
+        '<dt>' + I18N.t('proc.handles') + '</dt><dd>' + Object.keys(fdKinds).map(function (k) { return k + '×' + fdKinds[k]; }).join(I18N.t('punct.listSep')) + '</dd>' +
+        '<dt>' + I18N.t('proc.netConns') + '</dt><dd>' + I18N.t('unit.countSuffix').replace('{n}', (d.conns || []).length) + '</dd>' +
         '</dl>' +
-        '<div class="toolbar mt"><button class="btn" onclick="goToMemProc(' + pid + ')">查看完整内存地图 →</button></div>' +
-        (d.conns && d.conns.length ? '<div class="table-wrap mt" style="max-height:200px;overflow:auto"><table><thead><tr><th>协议</th><th>远程</th><th>状态</th></tr></thead><tbody>' +
+        '<div class="toolbar mt"><button class="btn" onclick="goToMemProc(' + pid + ')">' + I18N.t('proc.viewFullMemMap') + '</button></div>' +
+        (d.conns && d.conns.length ? '<div class="table-wrap mt" style="max-height:200px;overflow:auto"><table><thead><tr><th>' + I18N.t('th.proto') + '</th><th>' + I18N.t('th.remote') + '</th><th>' + I18N.t('th.state') + '</th></tr></thead><tbody>' +
           d.conns.map(function (c) { return '<tr><td>' + esc(c.proto) + '</td><td class="mono">' + esc(c.remote || c.local) + '</td><td>' + esc(c.state) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '');
-    }).catch(function () { el.innerHTML = '<div class="empty">该进程已退出或无权限查看</div>'; });
+    }).catch(function () { el.innerHTML = '<div class="empty">' + I18N.t('empty.procExited') + '</div>'; });
   }
 
   // ---------------- ALERTS ----------------
@@ -848,7 +883,7 @@
     refreshFns.alerts = loadAlerts;
     loadAlerts();
     api('/api/rules').then(function (r) {
-      document.getElementById('rulesCount').textContent = '(' + (r.rules || []).length + ' 条)';
+      document.getElementById('rulesCount').textContent = '(' + I18N.t('unit.entries').replace('{n}', (r.rules || []).length) + ')';
       document.getElementById('rulesBody').innerHTML = (r.rules || []).map(function (ru) {
         return '<tr><td><span class="risk ' + ru.risk + '">' + riskLabel(ru.risk) + '</span></td><td>' + esc(evText(ru, 'title')) + '<div class="dim" style="font-size:11.5px">' + esc(evText(ru, 'desc')) + '</div></td>' +
           '<td class="pro-only mono">' + esc(ru.id) + '</td><td class="pro-only mono">' + esc((ru.types || []).join(',')) + '</td><td class="pro-only mono">' + esc(ru.field) + ' ~ /' + esc(ru.pattern) + '/</td></tr>';
@@ -896,7 +931,7 @@
           return '<div class="gloss"><h3>' + esc(evText(t, 'term')) + (catLbl ? '<span class="tag">' + esc(catLbl) + '</span>' : '') + '</h3>' +
             '<div class="short">' + esc(evText(t, 'short')) + '</div><div class="plain-box">' + esc(evText(t, 'plain')) + '</div>' +
             (t.pro ? '<div class="pro-text mt">' + esc(evText(t, 'pro')) + '</div>' : '') + '</div>';
-        }).join('') || '<div class="empty">没有找到相关术语</div>';
+        }).join('') || '<div class="empty">' + I18N.t('empty.noTerms') + '</div>';
       }
       document.getElementById('glQ').addEventListener('input', debounce(render, 150));
       sel.addEventListener('change', render);

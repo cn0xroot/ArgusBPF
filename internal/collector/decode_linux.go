@@ -153,13 +153,17 @@ func toEvent(r *rawEvent) (*event.Event, bool) {
 		host, port := decodeSockaddr(r.Str1[:], r.Str1Len)
 		ev.SetField("host", host)
 		ev.SetField("port", fmt.Sprint(port))
-		ev.SetField("service", serviceGuess(port))
+		svcZh, svcEn := serviceGuess(port)
+		ev.SetField("service", svcZh)
+		ev.SetField("service_en", svcEn)
 		maybeSSH(ev, comm, host, port, "out")
 	case evListen:
 		ev.Cat, ev.Type = event.CatNet, "listen"
 		_, port := decodeSockaddr(r.Str1[:], r.Str1Len)
 		ev.SetField("port", fmt.Sprint(port))
-		ev.SetField("service", serviceGuess(port))
+		svcZh, svcEn := serviceGuess(port)
+		ev.SetField("service", svcZh)
+		ev.SetField("service_en", svcEn)
 	case evMmap:
 		ev.Cat, ev.Type = event.CatMemory, "mmap"
 		ev.SetField("addr", fmt.Sprintf("0x%x", uint64(r.Arg[0])))
@@ -295,7 +299,7 @@ func decodeSockaddr(buf []byte, n uint16) (string, int) {
 	}
 }
 
-func serviceGuess(port int) string {
+func serviceGuess(port int) (zh, en string) {
 	return sysinfo.ServiceName(port)
 }
 

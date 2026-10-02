@@ -10,6 +10,21 @@ ArgusBPF 是一个单文件 Go 二进制程序。在 Linux/amd64 上以 root 运
 
 思路上和 CC-Monitor 一类监控 AI 编码助手对电脑做了什么的工具类似，只是这次监控对象是操作系统本身，并且进一步识别出是哪个 AI Agent CLI 在动手。
 
+## 界面截图
+
+<table>
+<tr><th align="left">页面</th><th>中文</th><th>English</th></tr>
+<tr><td valign="top"><b>总览 / Overview</b></td><td><img src="docs/screenshots/overview-zh.png" width="420"></td><td><img src="docs/screenshots/overview-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>实时事件 / Live Events</b></td><td><img src="docs/screenshots/live-zh.png" width="420"></td><td><img src="docs/screenshots/live-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>时间线 / Timeline</b></td><td><img src="docs/screenshots/timeline-zh.png" width="420"></td><td><img src="docs/screenshots/timeline-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>网络 / Network</b></td><td><img src="docs/screenshots/net-zh.png" width="420"></td><td><img src="docs/screenshots/net-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>磁盘 / Disk</b></td><td><img src="docs/screenshots/disk-zh.png" width="420"></td><td><img src="docs/screenshots/disk-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>内存 / Memory</b></td><td><img src="docs/screenshots/mem-zh.png" width="420"></td><td><img src="docs/screenshots/mem-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>进程 / Processes</b></td><td><img src="docs/screenshots/proc-zh.png" width="420"></td><td><img src="docs/screenshots/proc-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>告警 / Alerts</b></td><td><img src="docs/screenshots/alerts-zh.png" width="420"></td><td><img src="docs/screenshots/alerts-en.png" width="420"></td></tr>
+<tr><td valign="top"><b>知识库 / Glossary</b></td><td><img src="docs/screenshots/glossary-zh.png" width="420"></td><td><img src="docs/screenshots/glossary-en.png" width="420"></td></tr>
+</table>
+
 ## 核心设计
 
 - **单一内核态分发器，不是逐进程 ptrace。** 一个 CO-RE 程序（`bpf/monitor.c`）挂在 `raw_syscalls/sys_enter` 以及 `module_load`/`block_rq_issue` 这几个 tracepoint 上，覆盖全系统所有进程，没有 ptrace 那种逐进程挂载的开销，换内核版本也不用重新编译（运行时不需要内核头文件）。

@@ -70,11 +70,6 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, st)
 }
 
-var catLabel = map[string]string{
-	"file": "文件", "process": "进程", "net": "网络", "memory": "内存",
-	"disk": "磁盘", "kernel": "内核", "security": "安全",
-}
-
 func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	rng := qInt64(r, "range", 3600)
 	lane := r.URL.Query().Get("lane")
@@ -86,14 +81,10 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	switch lane {
-	case "cat":
-		for i := range tl.Lanes {
-			if zh, ok := catLabel[tl.Lanes[i].Name]; ok {
-				tl.Lanes[i].Label = zh
-			}
-		}
-	case "agent":
+	// "cat" lane names are raw category keys (file/process/net/...); the
+	// server doesn't know the client's language, so leave Label unset and
+	// let the frontend translate them (see catLabel() in web/app.js).
+	if lane == "agent" {
 		for i := range tl.Lanes {
 			tl.Lanes[i].Label = "🤖 " + agents.DisplayName(tl.Lanes[i].Name)
 		}

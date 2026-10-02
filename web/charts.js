@@ -2,6 +2,8 @@
 (function (global) {
   'use strict';
 
+  function tt(key, fallback) { return global.I18N ? global.I18N.t(key) : fallback; }
+
   function cssVar(name, fallback) {
     var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return v || fallback || '#888';
@@ -192,14 +194,14 @@
     var n = o.points || 600;
     this.legend(this.hoverIdx != null ? this.hoverIdx : data.length - 1);
     if (data.length < 2) {
-      ctx.textAlign = 'center'; ctx.fillText('等待数据…', padL + cw / 2, padT + ch / 2); return;
+      ctx.textAlign = 'center'; ctx.fillText(tt('chart.waitingData', '等待数据…'), padL + cw / 2, padT + ch / 2); return;
     }
     // time labels
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     var span = (data[data.length - 1].t - data[0].t) / 1000;
     if (span > 0) {
       ctx.fillText('-' + Math.round(span) + 's', padL, h - 4);
-      ctx.textAlign = 'right'; ctx.fillText('现在', w - padR, h - 4);
+      ctx.textAlign = 'right'; ctx.fillText(tt('chart.now', '现在'), w - padR, h - 4);
     }
     var step = cw / (n - 1);
     var x0 = padL + cw - (data.length - 1) * step;
@@ -275,7 +277,7 @@
     ctx.font = '11px ' + cssVar('--mono', 'monospace');
     var dim = cssVar('--text-faint'), grid = cssVar('--grid', 'rgba(204,204,220,.08)');
     var pts = this.pts;
-    if (!pts.length) { ctx.fillStyle = dim; ctx.textAlign = 'center'; ctx.fillText(o.empty || '暂无数据', w / 2, h / 2); this._geo = null; return; }
+    if (!pts.length) { ctx.fillStyle = dim; ctx.textAlign = 'center'; ctx.fillText((typeof o.empty === 'function' ? o.empty() : o.empty) || tt('empty.noData', '暂无数据'), w / 2, h / 2); this._geo = null; return; }
     var xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
     pts.forEach(function (p) { if (p.x < xmin) xmin = p.x; if (p.x > xmax) xmax = p.x; if (p.y < ymin) ymin = p.y; if (p.y > ymax) ymax = p.y; });
     if (xmax === xmin) { xmax += 1000; xmin -= 1000; }
@@ -353,7 +355,7 @@
     ctx.clearRect(0, 0, w, h);
     var d = this.d, dim = cssVar('--text-faint'), text = cssVar('--text-dim'), grid = cssVar('--grid', 'rgba(204,204,220,.08)');
     ctx.font = '12px ' + cssVar('--sans', 'sans-serif');
-    if (!d || !d.lanes || !d.lanes.length) { ctx.fillStyle = dim; ctx.textAlign = 'center'; ctx.fillText('该时间段没有事件', w / 2, h / 2); return; }
+    if (!d || !d.lanes || !d.lanes.length) { ctx.fillStyle = dim; ctx.textAlign = 'center'; ctx.fillText(tt('chart.noEventsPeriod', '该时间段没有事件'), w / 2, h / 2); return; }
     var g = this.geo(), riskC = this.o.riskColor, maxN = 1;
     d.lanes.forEach(function (l) { l.buckets.forEach(function (b) { if (b.n > maxN) maxN = b.n; }); });
     var lmax = Math.log(maxN + 1);
@@ -413,7 +415,7 @@
     if (!hit || !hit.b || !hit.b.n) { hideTip(); return; }
     var f = function (t) { return new Date(t).toLocaleTimeString(); };
     showTip('<b>' + (hit.lane.label || hit.lane.name) + '</b><div class="dim">' + f(hit.since) + ' – ' + f(hit.until) + '</div>' +
-      '<div>' + hit.b.n + ' 个事件' + (hit.b.risk && hit.b.risk !== 'info' ? '，最高风险 <span class="risk ' + hit.b.risk + '">' + hit.b.risk + '</span>' : '') + '</div>', e.clientX, e.clientY);
+      '<div>' + tt('chart.eventsCount', '{n} 个事件').replace('{n}', hit.b.n) + (hit.b.risk && hit.b.risk !== 'info' ? tt('chart.highestRiskSuffix', '，最高风险 ') + '<span class="risk ' + hit.b.risk + '">' + hit.b.risk + '</span>' : '') + '</div>', e.clientX, e.clientY);
   };
 
   /* ---------------- AddrStrip (memory layout) ---------------- */

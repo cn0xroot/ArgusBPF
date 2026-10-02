@@ -237,6 +237,59 @@
     'drawer.ruleHit': ['命中规则', 'Rule matched'],
     'drawer.ruleId': ['规则 ID', 'Rule ID'],
     'drawer.techDetail': ['技术细节', 'Technical detail'],
+
+    'chart.now': ['现在', 'now'],
+    'chart.used': ['已用', 'Used'],
+    'chart.read': ['读', 'Read'],
+    'chart.write': ['写', 'Write'],
+    'chart.rx': ['收', 'RX'],
+    'chart.tx': ['发', 'TX'],
+    'chart.evPerSec': ['事件/s', 'events/s'],
+
+    'time.secAgo': ['{n} 秒前', '{n}s ago'],
+    'time.minAgo': ['{n} 分钟前', '{n}m ago'],
+    'time.hourAgo': ['{n} 小时前', '{n}h ago'],
+    'time.dayAgo': ['{n} 天前', '{n}d ago'],
+
+    'top.connected': ['已连接', 'Connected'],
+    'top.disconnected': ['连接已断开', 'Disconnected'],
+    'top.backendEbpf': ['eBPF 采集', 'eBPF collection'],
+    'top.backendPoll': ['轮询采集', 'Polling collection'],
+
+    'chart.waitingData': ['等待数据…', 'Waiting for data…'],
+    'chart.noEventsPeriod': ['该时间段没有事件', 'No events in this period'],
+    'chart.eventsCount': ['{n} 个事件', '{n} events'],
+    'chart.highestRiskSuffix': ['，最高风险 ', ', highest risk '],
+
+    'unit.entries': ['{n} 条', '{n}'],
+    'unit.countSuffix': ['{n} 个', '{n}'],
+
+    'empty.noData': ['暂无数据', 'No data'],
+    'empty.noAlerts': ['暂无告警，一切正常', 'No alerts, all clear'],
+    'empty.noConnections': ['暂无连接', 'No connections'],
+    'empty.noBlockIoSamples': ['暂无块设备 IO 采样', 'No block I/O samples'],
+    'empty.noDiskDevices': ['暂无磁盘设备', 'No disk devices'],
+    'empty.memMapUnsupported': ['该平台暂不支持内存地图', 'Memory map not supported on this platform'],
+    'empty.noProcesses': ['暂无进程', 'No processes'],
+    'empty.loading': ['加载中…', 'Loading…'],
+    'empty.noTerms': ['没有找到相关术语', 'No matching terms found'],
+    'empty.procExited': ['该进程已退出或无权限查看', 'This process has exited or you lack permission to view it'],
+
+    'mem.buffers': ['缓冲(buffers)', 'Buffers'],
+    'mem.cached': ['缓存(cached)', 'Cached'],
+    'mem.free': ['空闲', 'Free'],
+    'mem.mapTitle': ['内存地图 — ', 'Memory Map — '],
+    'mem.mapPlainDesc': ['{name} 把自己的内存台面划分成了下面这些区域：', '{name} divides its memory into the following regions:'],
+
+    'proc.cmdline': ['命令行', 'Command line'],
+    'proc.threadsSuffix': [' 线程', ' threads'],
+    'proc.memory': ['内存', 'Memory'],
+    'proc.diskIo': ['磁盘 IO', 'Disk I/O'],
+    'proc.handles': ['句柄', 'Handles'],
+    'proc.netConns': ['网络连接', 'Network connections'],
+    'proc.viewFullMemMap': ['查看完整内存地图 →', 'View full memory map →'],
+    'punct.listSep': ['，', ', '],
+    'th.remote': ['远程', 'Remote'],
   };
 
   // Cached in memory, not re-read from localStorage on every t() call —
@@ -253,9 +306,9 @@
     if (!pair) return key;
     return pair[curLang === 'en' ? 1 : 0];
   }
-  function setLang(l) {
+  function setLang(l, persist) {
     curLang = l === 'en' ? 'en' : 'zh';
-    try { localStorage.setItem('umon.lang', curLang); } catch (e) {}
+    if (persist !== false) { try { localStorage.setItem('umon.lang', curLang); } catch (e) {} }
     document.documentElement.setAttribute('lang', curLang === 'en' ? 'en' : 'zh-CN');
     applyI18n();
   }

@@ -96,10 +96,11 @@ type Conn struct {
 	State   string `json:"state"`
 	PID     int32  `json:"pid"`
 	Comm    string `json:"comm"`
-	Host    string `json:"host"`
-	Service string `json:"service"`
-	Plain   string `json:"plain"`
-	PlainEn string `json:"plain_en"`
+	Host      string `json:"host"`
+	Service   string `json:"service"`
+	ServiceEn string `json:"service_en"`
+	Plain     string `json:"plain"`
+	PlainEn   string `json:"plain_en"`
 }
 
 // ProcDetail is the full per-process view.

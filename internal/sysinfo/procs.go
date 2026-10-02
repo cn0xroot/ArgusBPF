@@ -97,9 +97,10 @@ func Connections() []Conn {
 		if port == 0 {
 			port = c.Laddr.Port
 		}
+		svcZh, svcEn := ServiceName(int(port))
 		out = append(out, Conn{
 			Proto: proto, Local: local, Remote: remote, State: c.Status,
-			PID: c.Pid, Comm: comm, Service: ServiceName(int(port)),
+			PID: c.Pid, Comm: comm, Service: svcZh, ServiceEn: svcEn,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -122,26 +123,26 @@ func connProto(sockType uint32, family uint32) string {
 	return t
 }
 
-// ServiceName maps a well-known port to a human label.
-func ServiceName(port int) string {
+// ServiceName maps a well-known port to a human label, in Chinese and English.
+func ServiceName(port int) (zh, en string) {
 	if s, ok := wellKnownPorts[port]; ok {
-		return s
+		return s[0], s[1]
 	}
 	if port >= 49152 {
-		return "临时端口"
+		return "临时端口", "Ephemeral port"
 	}
-	return ""
+	return "", ""
 }
 
-var wellKnownPorts = map[int]string{
-	20: "FTP数据", 21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP邮件",
-	53: "DNS域名", 67: "DHCP", 68: "DHCP", 80: "HTTP网页", 110: "POP3邮件",
-	123: "NTP时间", 143: "IMAP邮件", 161: "SNMP", 443: "HTTPS加密网页",
-	445: "SMB文件共享", 465: "SMTPS", 587: "SMTP提交", 993: "IMAPS", 995: "POP3S",
-	1080: "SOCKS代理", 1433: "SQLServer", 1521: "Oracle", 2049: "NFS",
-	3306: "MySQL", 3389: "远程桌面RDP", 5432: "PostgreSQL", 5900: "VNC",
-	6379: "Redis", 8080: "HTTP代理", 8443: "HTTPS备用", 9200: "Elasticsearch",
-	11211: "Memcached", 27017: "MongoDB",
+var wellKnownPorts = map[int][2]string{
+	20: {"FTP数据", "FTP data"}, 21: {"FTP", "FTP"}, 22: {"SSH", "SSH"}, 23: {"Telnet", "Telnet"}, 25: {"SMTP邮件", "SMTP mail"},
+	53: {"DNS域名", "DNS"}, 67: {"DHCP", "DHCP"}, 68: {"DHCP", "DHCP"}, 80: {"HTTP网页", "HTTP web"}, 110: {"POP3邮件", "POP3 mail"},
+	123: {"NTP时间", "NTP time"}, 143: {"IMAP邮件", "IMAP mail"}, 161: {"SNMP", "SNMP"}, 443: {"HTTPS加密网页", "HTTPS web"},
+	445: {"SMB文件共享", "SMB file sharing"}, 465: {"SMTPS", "SMTPS"}, 587: {"SMTP提交", "SMTP submission"}, 993: {"IMAPS", "IMAPS"}, 995: {"POP3S", "POP3S"},
+	1080: {"SOCKS代理", "SOCKS proxy"}, 1433: {"SQLServer", "SQL Server"}, 1521: {"Oracle", "Oracle"}, 2049: {"NFS", "NFS"},
+	3306: {"MySQL", "MySQL"}, 3389: {"远程桌面RDP", "Remote desktop (RDP)"}, 5432: {"PostgreSQL", "PostgreSQL"}, 5900: {"VNC", "VNC"},
+	6379: {"Redis", "Redis"}, 8080: {"HTTP代理", "HTTP proxy"}, 8443: {"HTTPS备用", "HTTPS alt"}, 9200: {"Elasticsearch", "Elasticsearch"},
+	11211: {"Memcached", "Memcached"}, 27017: {"MongoDB", "MongoDB"},
 }
 
 // splitHostPort returns the host part of "host:port".

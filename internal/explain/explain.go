@@ -156,12 +156,12 @@ func explainNet(ev *event.Event) {
 	switch ev.Type {
 	case "connect":
 		host, port := ev.Str("host"), ev.Str("port")
-		svc := ev.Str("service")
+		svc, svcEn := ev.Str("service"), ev.Str("service_en")
 		plainZh := fmt.Sprintf("%s 连接到了 %s（端口 %s）", actor(ev), host, port)
 		plainEn := fmt.Sprintf("%s connected to %s (port %s)", actor(ev), host, port)
 		if svc != "" {
 			plainZh = fmt.Sprintf("%s 连接到了 %s（端口 %s，%s）", actor(ev), host, port, svc)
-			plainEn = fmt.Sprintf("%s connected to %s (port %s, %s)", actor(ev), host, port, svc)
+			plainEn = fmt.Sprintf("%s connected to %s (port %s, %s)", actor(ev), host, port, svcEn)
 		}
 		set(ev, "发起网络连接", "Made a network connection", fmt.Sprintf("connect(%s:%s)", host, port),
 			plainZh, plainEn,
