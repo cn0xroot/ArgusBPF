@@ -62,7 +62,7 @@ make build
 
 ## 架构
 
-完整设计（事件模型、采集管线、风险规则、专业/通俗双解释引擎、`web/` 所用的 HTTP/WebSocket API 契约）见 [DESIGN.md](DESIGN.md)。
+完整设计（事件模型、采集管线、风险规则、专业/通俗双解释引擎、`web/` 所用的 HTTP/WebSocket API 契约）见 [DESIGN.zh-CN.md](DESIGN.zh-CN.md)。
 
 ```
 采集器 (eBPF | 轮询) -> 管线 (规则 + 解释 + 1秒聚合) -> SQLite + WebSocket Hub -> Web UI

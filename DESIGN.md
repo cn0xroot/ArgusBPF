@@ -1,140 +1,148 @@
-# ArgusBPF 技术方案
+# ArgusBPF — Technical Design
 
-> 目标：参考 CC-Monitor（监控 Claude Code 对电脑的操作），做一个监控**操作系统本身所有活动**的工具 ——
-> 进程、文件、网络、内存、磁盘、内核/安全事件；提供 Web UI，并同时提供
-> **专业模式**（syscall 参数、内存地址、扇区号、fd、flags…）和**通俗模式**（用生活化类比讲清楚技术原理）。
+*[中文说明](DESIGN.zh-CN.md)*
 
-## 1. 技术选型
+> Goal: following CC-Monitor's approach (which watches what Claude Code does to a machine), build a tool that watches **everything the operating system itself does** —
+> processes, files, network, memory, disk, kernel/security events — with a Web UI that offers both
+> a **Professional mode** (syscall args, memory addresses, sector numbers, fd, flags…) and a **Plain-language mode** (the same technical mechanics explained through everyday analogies).
 
-| 项 | 选择 | 理由 |
+## 1. Technology choices
+
+| Item | Choice | Rationale |
 |---|---|---|
-| 语言 | Go 1.26 | 单二进制、交叉编译方便、cilium/ebpf 生态成熟 |
-| Linux 内核采集 | eBPF（cilium/ebpf v0.22，CO-RE，tracepoint/kprobe/uprobe，ringbuf） | 零侵入、低开销、可拿到内核级细节（地址、扇区、返回值） |
-| 跨平台采集 | gopsutil v4 轮询（Linux / macOS / Windows / FreeBSD） | 无 root / 无 eBPF 时自动降级 |
-| 系统指标 | Linux: /proc；其他: gopsutil | CPU、内存、磁盘、网卡吞吐曲线 |
-| 存储 | 内存环形缓冲（实时）+ SQLite（modernc 纯 Go，无 CGO） | 无 CGO 便于交叉编译；历史可查询 |
-| 推送 | WebSocket（改进 CC-Monitor 的 REST 轮询） | 事件实时到达，批量合包 |
-| 前端 | 原生 JS + Canvas，`go:embed` 打进二进制 | 与 CC-Monitor 一致：无构建链、单文件分发 |
+| Language | Go 1.26 | Single binary, easy cross-compilation, mature cilium/ebpf ecosystem |
+| Linux kernel collection | eBPF (cilium/ebpf v0.22, CO-RE, tracepoint/kprobe/uprobe, ringbuf) | Non-intrusive, low overhead, kernel-level detail (addresses, sectors, return values) |
+| Cross-platform collection | gopsutil v4 polling (Linux / macOS / Windows / FreeBSD) | Automatic fallback with no root / no eBPF |
+| System metrics | Linux: /proc; elsewhere: gopsutil | CPU, memory, disk, NIC throughput curves |
+| Storage | In-memory ring buffer (live) + SQLite (modernc, pure Go, no CGO) | No CGO keeps cross-compilation easy; history stays queryable |
+| Push | WebSocket (an improvement over CC-Monitor's REST polling) | Events arrive live, batched |
+| Frontend | Vanilla JS + Canvas, embedded into the binary via `go:embed` | Matches CC-Monitor: no build chain, single-file distribution |
 
-## 2. 架构
+## 2. Architecture
 
 ```
- ┌──────────────── 采集层 Collector（按平台/权限自动选择）────────────────┐
- │ eBPF(Linux,root)    : exec/exit/fork, openat, read/write 聚合, unlink,   │
- │                       rename, connect/accept/bind/listen, DNS(uprobe),   │
- │                       tcp 收发字节, mmap/mprotect/munmap/brk,            │
- │                       ptrace, process_vm_readv/writev, 缺页采样,         │
- │                       块设备请求(扇区), 内核模块加载, setuid, kill       │
- │ Poller(全平台)      : 进程新建/退出差分、连接差分、进程 IO/内存差分     │
- │ SysStats            : CPU/内存/磁盘/网卡 每秒采样                        │
- └───────────────┬─────────────────────────────────────────────────────────┘
+ ┌──────────────── Collector layer (auto-selected by platform/privilege) ──┐
+ │ eBPF (Linux, root): exec/exit/fork, openat, read/write aggregation,     │
+ │                      unlink, rename, connect/accept/bind/listen,        │
+ │                      DNS (uprobe), tcp bytes sent/received,             │
+ │                      mmap/mprotect/munmap/brk, ptrace,                  │
+ │                      process_vm_readv/writev, page-fault sampling,      │
+ │                      block device requests (sector), kernel module      │
+ │                      load, setuid, kill                                 │
+ │ Poller (all platforms): new/exited process diff, connection diff,       │
+ │                      per-process IO/memory diff                         │
+ │ SysStats           : CPU/memory/disk/NIC sampled every second           │
+ └───────────────┬───────────────────────────────────────────────────────────┘
                  ▼  RawEvent
- ┌──────── 处理管线 Pipeline ────────┐
- │ 1. Enrich  : 补进程名/exe/用户/fd→路径 │
- │ 2. Aggregate: 高频事件(读写/缺页/块IO)按 (pid,类型,目标) 1s 合并 │
- │ 3. Rules   : 风险规则(JSON, 可自定义) → risk/rule/告警标题      │
- │ 4. Explain : 生成 pro 摘要 + plain 通俗解释 + 类比              │
+ ┌──────── Pipeline ────────┐
+ │ 1. Enrich  : fill in process name/exe/user/fd→path                     │
+ │ 2. Aggregate: fold high-frequency events (read/write/pagefault/block    │
+ │               IO) per (pid, type, target) into 1s windows              │
+ │ 3. Rules   : risk rules (JSON, user-customizable) -> risk/rule/alert    │
+ │              title                                                      │
+ │ 4. Explain : generate the pro one-liner + plain-language explanation    │
+ │              + analogy                                                  │
  └───────────────┬──────────────────┘
                  ▼  Event
      Ring buffer ── SQLite ── WebSocket Hub ── HTTP API ── Web UI
 ```
 
-## 3. 事件模型
+## 3. Event model
 
 ```jsonc
 {
-  "id": 123, "ts": 1759300000123,          // 毫秒
+  "id": 123, "ts": 1759300000123,          // milliseconds
   "cat": "file|process|net|memory|disk|kernel|security",
   "type": "open|read|write|exec|connect|mmap|mprotect|ptrace|vm_read|block_io|...",
   "pid": 1234, "ppid": 1, "tid": 1234, "uid": 0, "user": "root",
   "comm": "curl", "exe": "/usr/bin/curl",
-  "risk": "info|low|medium|high", "rule": "mem.wx_page", "rule_title": "内存同时可写可执行",
-  "title": "openat",                        // 专业短标题
+  "risk": "info|low|medium|high", "rule": "mem.wx_page", "rule_title": "Memory page became writable+executable",
+  "title": "openat",                        // short professional label
   "pro":   "openat(\"/etc/passwd\", O_RDONLY) = 3",
-  "plain": "程序 curl 打开了系统账户清单文件来查看内容",
-  "analogy": "就像翻开了小区的住户登记簿",
+  "plain": "The program curl opened the system account list file to look at it",
+  "analogy": "Like flipping open the building's resident registry",
   "fields": { "path": "/etc/passwd", "flags": "O_RDONLY", "fd": 3, "ret": 3 },
-  "count": 1                                // 聚合条数
+  "count": 1                                // number of aggregated raw events
 }
 ```
 
-## 4. 双模式解释引擎（internal/explain）
+## 4. Dual-mode explanation engine (internal/explain)
 
-- **专业模式**：还原 syscall 形态 `mmap(0x0, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f3a2c000000`，
-  显示 fd、flags 解码、地址、长度、扇区号、errno 等。
-- **通俗模式**：模板 + 知识库，不依赖 LLM，离线可用：
-  - 路径语义识别：`/etc/shadow` → "系统密码库"，`~/.ssh` → "SSH 钥匙"，`/proc/<pid>/mem` → "另一个程序的内存"…
-  - 进程语义识别：浏览器、包管理器、shell、编译器…
-  - 端口语义：443 → "加密网页(HTTPS)"、22 → "远程登录(SSH)"、53 → "查域名(DNS)"…
-  - 每类事件带一个类比（"mmap 像向仓库申请一块货架"）。
-  - 知识库页面：解释 syscall、fd、页、缺页、扇区、TCP 握手等概念。
+- **Professional mode**: reconstructs the syscall form, e.g. `mmap(0x0, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f3a2c000000`,
+  showing fd, decoded flags, address, length, sector number, errno, etc.
+- **Plain-language mode**: template + knowledge base, no LLM dependency, works fully offline:
+  - Path semantics: `/etc/shadow` → "the system password vault", `~/.ssh` → "SSH keys", `/proc/<pid>/mem` → "another program's memory"…
+  - Process semantics: browsers, package managers, shells, compilers…
+  - Port semantics: 443 → "encrypted web (HTTPS)", 22 → "remote login (SSH)", 53 → "domain lookup (DNS)"…
+  - Every event category carries an analogy ("mmap is like requesting a shelf of warehouse space").
+  - A glossary page explains concepts like syscalls, fds, pages, page faults, sectors, the TCP handshake, etc.
 
-## 5. 风险规则（internal/rules，`default_rules.json`，可放 `~/.argusbpf/rules.json` 覆盖）
+## 5. Risk rules (internal/rules, `default_rules.json`, overridable via `~/.argusbpf/rules.json`)
 
-字段与 CC-Monitor 保持一致：`id, risk, types, field, pattern(正则), title, desc`。示例：
-- high：读写 `/etc/shadow`、`/proc/*/mem`；ptrace 附加；process_vm_writev；mprotect 产生 W+X 页；加载内核模块；`/tmp` 下的可执行文件被执行
-- medium：写 `/etc/*`、修改 `~/.bashrc`/crontab、连接非常见端口、setuid
-- low：外部网络连接、监听端口
+Fields follow the same shape CC-Monitor uses: `id, risk, types, field, pattern (regex), title, desc`. Examples:
+- high: reading/writing `/etc/shadow`, `/proc/*/mem`; a ptrace attach; process_vm_writev; mprotect producing a W+X page; loading a kernel module; executing a binary under `/tmp`
+- medium: writing `/etc/*`, modifying `~/.bashrc`/crontab, connecting to an uncommon port, setuid
+- low: an outbound network connection, a listening port
 
-## 5b. 应用层明文采集（借鉴 gojue/ecapture，uprobe）
+## 5b. Application-layer plaintext capture (borrowing from gojue/ecapture, uprobes)
 
-用 eBPF uprobe 挂在用户态库/程序的函数上，拿到**加密前/解密后的明文**与高层语义，
-不做中间人、不改证书。属于 `cat:"security"` 或 `net`，默认 medium 风险、可配脱敏。
+eBPF uprobes hang off functions in user-space libraries/programs to recover **plaintext before encryption / after decryption** along with higher-level semantics,
+with no man-in-the-middle proxy and no certificate tampering. These land under `cat:"security"` or `net`, default to medium risk, and can be configured to redact.
 
-| 模块 | 挂载点 | 捕获内容 | 开关 |
+| Module | Attach point | Captures | Flag |
 |---|---|---|---|
-| TLS 明文 | `libssl` `SSL_write`/`SSL_read`（OpenSSL/BoringSSL），GnuTLS `gnutls_record_send/recv`，NSS | HTTPS/TLS 明文收发（截断预览，默认脱敏） | `--tls` |
-| Go TLS | Go 程序 `crypto/tls (*Conn).Write/Read`（按符号/偏移） | 纯 Go 程序的 TLS 明文 | `--tls` |
-| Bash 审计 | bash `readline` 返回处 uprobe | 交互式 shell 实际执行的命令行 | `--bash` |
-| MySQL | `mysqld` `dispatch_command` | SQL 查询语句 | `--db` |
-| PostgreSQL | `postgres` `exec_simple_query` | SQL 查询语句 | `--db` |
-| SSH | sshd/ssh 连接事件（结合 connect/accept + 端口22 + comm） | 登录来源、方向 | 默认开 |
+| TLS plaintext | `libssl`'s `SSL_write`/`SSL_read` (OpenSSL/BoringSSL), GnuTLS's `gnutls_record_send/recv`, NSS | HTTPS/TLS plaintext send/recv (truncated preview, redacted by default) | `--tls` |
+| Go TLS | A Go program's `crypto/tls (*Conn).Write/Read` (by symbol/offset) | TLS plaintext for pure-Go programs | `--tls` |
+| Bash audit | A uprobe at bash's `readline` return | The actual command line an interactive shell ran | `--bash` |
+| MySQL | `mysqld`'s `dispatch_command` | SQL query text | `--db` |
+| PostgreSQL | `postgres`'s `exec_simple_query` | SQL query text | `--db` |
+| SSH | sshd/ssh connection events (combining connect/accept + port 22 + comm) | Login source, direction | on by default |
 
-- 库定位：解析目标进程 `/proc/pid/maps` 找到 `libssl.so` 路径与基址，`--tls` 时对新出现的
-  使用 libssl 的进程自动 attach；也可 `--tls-pid <pid>` 指定。
-- 事件新增字段：`fields.payload`（明文预览，≤512B，可 `--no-payload` 关闭）、`fields.sql`、`fields.cmdline`、`fields.tls_version`。
-- UI：网络页新增「明文/协议」子表；专业模式显示十六进制+ASCII，通俗模式显示"某程序通过加密通道发送了这些内容"。
+- Library discovery: parse the target process's `/proc/pid/maps` to find `libssl.so`'s path and base address; with `--tls`, newly-seen
+  processes that use libssl are attached automatically, or a specific one can be named via `--tls-pid <pid>`.
+- New event fields: `fields.payload` (plaintext preview, ≤512B, disable with `--no-payload`), `fields.sql`, `fields.cmdline`, `fields.tls_version`.
+- UI: the network page gets a "plaintext/protocol" sub-table; professional mode shows hex+ASCII, plain-language mode shows "program X sent this content over an encrypted channel".
 
-## 6. Web UI 页面
+## 6. Web UI pages
 
-| 页面 | 内容 |
+| Page | Content |
 |---|---|
-| 总览 | CPU/内存/磁盘/网络实时曲线、分类计数卡片、风险分布、Top 进程 |
-| 实时事件 | 事件流（筛选：分类/风险/进程/关键词，暂停/自动滚动），点击看详情 |
-| 时间线 | 泳道图（按分类或按进程），风险着色，可选 5m/1h/6h/24h，点击下钻 |
-| 网络 | 当前连接表（进程、远端、域名、状态、端口含义）、DNS 查询、流量 Top |
-| 磁盘 | 设备吞吐、块请求扇区散点图、文件读写 Top |
-| 内存 | 系统内存构成、进程内存地图（/proc/pid/maps 可视化 + 区域通俗标注）、mmap/mprotect 事件 |
-| 进程 | 进程树、详情（命令行、fd、内存、IO、连接） |
-| 告警 | 中/高风险事件、命中规则 |
-| 知识库 | 名词解释（通俗） |
+| Overview | Live CPU/memory/disk/network curves, per-category count cards, risk distribution, top processes |
+| Live events | Event stream (filter by category/risk/process/keyword, pause/autoscroll), click for detail |
+| Timeline | Swimlane chart (by category or by process), risk-colored, 5m/1h/6h/24h ranges, click to drill in |
+| Network | Current connection table (process, remote, domain, state, what the port means), DNS lookups, top traffic |
+| Disk | Device throughput, block-request sector scatter plot, top file/process IO |
+| Memory | System memory composition, per-process memory map (`/proc/pid/maps` visualized with plain-language region labels), mmap/mprotect events |
+| Processes | Process tree, detail (command line, fds, memory, IO, connections) |
+| Alerts | Medium/high-risk events, matched rules |
+| Glossary | Plain-language term explanations |
 
-顶栏全局开关：**专业 / 通俗** 模式切换（影响表格列、详情、标题）、深/浅主题、采集后端状态。
+Global toolbar toggles: **Professional / Plain-language** mode (affects table columns, detail, titles), dark/light theme, collector backend status.
 
 ## 7. HTTP / WebSocket API
 
-| 接口 | 说明 |
+| Endpoint | Description |
 |---|---|
-| `GET /api/info` | 版本、主机、OS、采集后端（ebpf/poll）、能力列表 |
-| `GET /api/events?cat=&risk=&type=&pid=&q=&before=&limit=` | 历史事件（SQLite） |
-| `GET /api/stats` | 分类/风险/类型计数、Top 进程、每秒速率 |
-| `GET /api/timeline?range=3600&lane=cat` | 时间桶聚合 |
-| `GET /api/system` / `GET /api/system/history` | 当前系统快照 / 最近 10 分钟曲线 |
-| `GET /api/processes` | 进程列表 |
-| `GET /api/process/{pid}` | 进程详情 + 内存地图 + fd + 连接 |
-| `GET /api/connections` | 当前 socket |
-| `GET /api/disk` | 设备统计 + 文件 IO Top |
-| `GET /api/rules` / `GET /api/glossary` | 规则 / 知识库 |
-| `WS /ws` | 推送 `{"t":"events","d":[Event...]}`（≤200ms 合包）与 `{"t":"sys","d":Snapshot}`（1s） |
+| `GET /api/info` | Version, host, OS, collector backend (ebpf/poll), capability list |
+| `GET /api/events?cat=&risk=&type=&pid=&q=&before=&limit=` | Historical events (SQLite) |
+| `GET /api/stats` | Per-category/risk/type counts, top processes, per-second rate |
+| `GET /api/timeline?range=3600&lane=cat` | Time-bucketed aggregation |
+| `GET /api/system` / `GET /api/system/history` | Current system snapshot / last 10 minutes of curves |
+| `GET /api/processes` | Process list |
+| `GET /api/process/{pid}` | Process detail + memory map + fds + connections |
+| `GET /api/connections` | Current sockets |
+| `GET /api/disk` | Device stats + top file IO |
+| `GET /api/rules` / `GET /api/glossary` | Rules / glossary |
+| `WS /ws` | Pushes `{"t":"events","d":[Event...]}` (batched, ≤200ms) and `{"t":"sys","d":Snapshot}` (1s) |
 
-## 8. 跨平台策略
+## 8. Cross-platform strategy
 
-- `collector_linux.go`：有 root + BTF → eBPF；否则降级 Poller。
-- `collector_other.go`（darwin/windows/freebsd）：Poller（gopsutil）。
-- 纯 Go 无 CGO：`GOOS=darwin/windows go build` 可直接交叉编译；eBPF 字节码预编译后 `go:embed`。
+- `collector_linux.go`: root + BTF available → eBPF; otherwise falls back to the Poller.
+- `collector_other.go` (darwin/windows/freebsd): the Poller (gopsutil).
+- Pure Go, no CGO: `GOOS=darwin/windows go build` cross-compiles directly; the eBPF bytecode is precompiled and embedded via `go:embed`.
 
-## 9. 安全 / 性能
+## 9. Security / performance
 
-- 默认只监听 `127.0.0.1:1024`，`--listen` 可改；可选 `--token` 访问令牌。
-- 过滤自身 PID 防止反馈环；read/write/缺页/块 IO 内核侧计数 + 用户态 1s 合并，避免事件风暴。
-- SQLite 批量事务写入，按条数/天数自动清理（默认 50 万条 / 7 天）。
+- Listens only on `127.0.0.1:1024` by default, changeable via `--listen`; an optional `--token` access token.
+- Filters out its own PID to avoid a feedback loop; read/write/pagefault/block-IO counting happens kernel-side with a 1s user-space merge to avoid an event storm.
+- SQLite writes happen in batched transactions, with automatic cleanup by row count/age (defaults: 500,000 rows / 7 days).
