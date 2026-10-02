@@ -10,11 +10,18 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/ringbuf"
+	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
 
 	"argusbpf/internal/event"
 )
+
+// perCPUBufferSize is the per-CPU perf ring size perf.NewReader allocates
+// for the events map. events is perf_event_array rather than the newer
+// BPF_MAP_TYPE_RINGBUF (see bpf/monitor.c's own comment on that map): a
+// ringbuf is one shared buffer sized once; perf_event_array is one ring
+// per CPU, so this number is "per core", not "total".
+const perCPUBufferSize = 256 * 1024 // 256 KiB/core
 
 // EBPFCollector hooks the kernel via the CO-RE program in bpf/monitor.c.
 // Requires root (or CAP_BPF+CAP_PERFMON) and kernel BTF; NewEBPF returns an
@@ -22,7 +29,7 @@ import (
 type EBPFCollector struct {
 	objs     MonitorObjects
 	links    []io.Closer
-	reader   *ringbuf.Reader
+	reader   *perf.Reader
 	warnings []string
 	caps     []string
 }
@@ -64,10 +71,10 @@ func NewEBPF() (*EBPFCollector, error) {
 	c.caps = append(c.caps, upcaps...)
 	c.warnings = append(c.warnings, upwarn...)
 
-	r, err := ringbuf.NewReader(objs.Events)
+	r, err := perf.NewReader(objs.Events, perCPUBufferSize)
 	if err != nil {
 		c.Close()
-		return nil, fmt.Errorf("open ringbuf reader: %w", err)
+		return nil, fmt.Errorf("open perf reader: %w", err)
 	}
 	c.reader = r
 	return c, nil

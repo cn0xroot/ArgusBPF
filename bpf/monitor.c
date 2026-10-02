@@ -87,10 +87,40 @@ struct event {
 	char str2[STR_LEN];
 };
 
+// BPF_MAP_TYPE_RINGBUF (the obvious choice) doesn't exist on every kernel
+// we need to run on: it's a 5.8+ type, and at least one BTF-enabled,
+// CO-RE-capable vendor kernel we've hit in the field (5.4.265, a patched
+// automotive kernel with real BTF but an older map-type set) rejects its
+// creation outright (EINVAL) because the runtime never backported it -
+// not a BTF/CO-RE encoding issue, the map type genuinely isn't implemented.
+// perf_event_array has been there since kernel ~4.3 and needs nothing this
+// project doesn't already have, so it's the one path that actually runs
+// everywhere CO-RE does. See bind_perf_event_array's own comment for why
+// a larger, lock-free ring loses out to "runs on the kernel in front of
+// us" here.
 struct {
-	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 1 << 22); // 4MB
+	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(__u32));
+	// max_entries deliberately left unset: cilium/ebpf resizes a
+	// PerfEventArray to the host's possible-CPU count at load time.
 } events SEC(".maps");
+
+// struct event is >512B (two 256B string fields alone), over the BPF stack
+// limit, so it can't live on the stack between "reserve" and "submit" the
+// way a ringbuf record can. One per-CPU scratch slot holds the
+// in-progress event instead; per-CPU is the key part - two tracepoints
+// firing on different CPUs each get their own slot, a tracepoint firing
+// on the same CPU that's still using its slot can't happen (BPF programs
+// run with preemption/IRQs handled such that this one never reenters
+// itself on one CPU), which is the same assumption every eBPF tool using
+// this pattern for over-sized records relies on.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct event);
+} event_scratch SEC(".maps");
 
 struct cfg {
 	__u32 self_pid;
@@ -128,6 +158,21 @@ static __always_inline bool is_self(__u32 tgid) {
 	__u32 key = 0;
 	struct cfg *c = bpf_map_lookup_elem(&monitor_cfg, &key);
 	return c && c->self_pid != 0 && c->self_pid == tgid;
+}
+
+// reserve_event/submit_event replace ringbuf's reserve/submit pair for the
+// perf_event_array path: "reserve" is a lookup into this CPU's scratch
+// slot (never fails once the map itself exists), "submit" is
+// bpf_perf_event_output, which - unlike bpf_ringbuf_submit - needs the
+// program's own ctx, so every call site below passes its own `ctx`
+// through unchanged.
+static __always_inline struct event *reserve_event(void) {
+	__u32 key = 0;
+	return bpf_map_lookup_elem(&event_scratch, &key);
+}
+
+static __always_inline void submit_event(void *ctx, struct event *e) {
+	bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, e, sizeof(*e));
 }
 
 static __always_inline void fill_common(struct event *e, __u32 kind) {
@@ -170,52 +215,52 @@ int handle_sys_enter(struct trace_event_raw_sys_enter *ctx) {
 	switch (id) {
 	case NR_execve:
 	case NR_execveat: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_EXEC);
 		const char *path = (const char *)(id == NR_execve ? args[0] : args[1]);
 		e->str1_len = bpf_probe_read_user_str(e->str1, STR_LEN, path);
 		e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_exit:
 	case NR_exit_group: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_EXIT);
 		e->arg[0] = args[0];
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_open:
 	case NR_openat: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_OPEN);
 		const char *path = (const char *)(id == NR_open ? args[0] : args[1]);
 		e->arg[0] = id == NR_open ? (long)args[1] : (long)args[2]; // flags
 		e->str1_len = bpf_probe_read_user_str(e->str1, STR_LEN, path);
 		e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_unlink:
 	case NR_unlinkat: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_UNLINK);
 		const char *path = (const char *)(id == NR_unlink ? args[0] : args[1]);
 		e->str1_len = bpf_probe_read_user_str(e->str1, STR_LEN, path);
 		e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_rename:
 	case NR_renameat:
 	case NR_renameat2: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_RENAME);
 		const char *oldp, *newp;
@@ -223,12 +268,12 @@ int handle_sys_enter(struct trace_event_raw_sys_enter *ctx) {
 		else { oldp = (const char *)args[1]; newp = (const char *)args[3]; }
 		e->str1_len = bpf_probe_read_user_str(e->str1, STR_LEN, oldp);
 		e->str2_len = bpf_probe_read_user_str(e->str2, STR_LEN, newp);
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_connect:
 	case NR_bind: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		// bind(2) itself is never shipped as an event; it's only stashed so a
 		// later listen(2) on the same fd can report the port it bound to.
@@ -242,14 +287,16 @@ int handle_sys_enter(struct trace_event_raw_sys_enter *ctx) {
 			__builtin_memcpy(ba.buf, e->str1, sizeof(ba.buf));
 			__u64 k = ((__u64)tgid << 32) | (__u32)args[0];
 			bpf_map_update_elem(&bind_addrs, &k, &ba, BPF_ANY);
-			bpf_ringbuf_discard(e, 0);
+			// Nothing to discard here (unlike ringbuf's reserve/discard
+			// pair): the scratch slot above was never queued anywhere,
+			// so just not calling submit_event is the whole story.
 		} else {
-			bpf_ringbuf_submit(e, 0);
+			submit_event(ctx, e);
 		}
 		return 0;
 	}
 	case NR_listen: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_LISTEN);
 		e->arg[0] = args[0]; // fd
@@ -258,82 +305,82 @@ int handle_sys_enter(struct trace_event_raw_sys_enter *ctx) {
 		if (ba) { __builtin_memcpy(e->str1, ba->buf, sizeof(ba->buf)); e->str1_len = ba->len; }
 		else e->str1_len = 0;
 		e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_mmap: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_MMAP);
 		e->arg[0] = args[0]; e->arg[1] = args[1]; e->arg[2] = args[2];
 		e->arg[3] = args[3]; e->arg[4] = args[4]; e->arg[5] = args[5];
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_mprotect: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_MPROTECT);
 		e->arg[0] = args[0]; e->arg[1] = args[1]; e->arg[2] = args[2];
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_munmap: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_MUNMAP);
 		e->arg[0] = args[0]; e->arg[1] = args[1];
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_brk: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_BRK);
 		e->arg[0] = args[0];
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_ptrace: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_PTRACE);
 		e->arg[0] = args[0]; e->arg[1] = args[1]; e->arg[2] = args[2]; e->arg[3] = args[3];
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_process_vm_readv:
 	case NR_process_vm_writev: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, id == NR_process_vm_readv ? EV_VM_READ : EV_VM_WRITE);
 		e->arg[0] = args[0]; // target pid
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_setuid: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_SETUID);
 		e->arg[0] = bpf_get_current_uid_gid() & 0xffffffff; // from
 		e->arg[1] = args[0]; // to
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	case NR_kill: {
-		struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+		struct event *e = reserve_event();
 		if (!e) return 0;
 		fill_common(e, EV_KILL);
 		e->arg[0] = args[0]; e->arg[1] = args[1];
 		e->str1_len = 0; e->str2_len = 0;
-		bpf_ringbuf_submit(e, 0);
+		submit_event(ctx, e);
 		return 0;
 	}
 	default:
@@ -349,12 +396,12 @@ int handle_sys_enter(struct trace_event_raw_sys_enter *ctx) {
 // ---------------------------------------------------------------------------
 SEC("tracepoint/module/module_load")
 int handle_module_load(struct trace_event_raw_module_load *ctx) {
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	struct event *e = reserve_event();
 	if (!e) return 0;
 	fill_common(e, EV_MODULE_LOAD);
 	read_data_loc_str(ctx, ctx->__data_loc_name, e->str1, STR_LEN);
 	e->str1_len = 1; e->str2_len = 0;
-	bpf_ringbuf_submit(e, 0);
+	submit_event(ctx, e);
 	return 0;
 }
 
@@ -363,7 +410,7 @@ int handle_module_load(struct trace_event_raw_module_load *ctx) {
 // ---------------------------------------------------------------------------
 SEC("tracepoint/block/block_rq_issue")
 int handle_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	struct event *e = reserve_event();
 	if (!e) return 0;
 	fill_common(e, EV_BLOCK_RQ);
 	// Note: fill_common's comm is the *current* task, which for block IO
@@ -378,7 +425,7 @@ int handle_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 	// rwbs[0] is 'R' for read, 'W' for write (see Documentation/block/biodoc).
 	e->arg[3] = ctx->rwbs[0];
 	e->str1_len = 0; e->str2_len = 0;
-	bpf_ringbuf_submit(e, 0);
+	submit_event(ctx, e);
 	return 0;
 }
 
@@ -391,20 +438,20 @@ int handle_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 // getaddrinfo(const char *node, ...) in libc -> DNS query name.
 SEC("uprobe/getaddrinfo")
 int uprobe_getaddrinfo(struct pt_regs *ctx) {
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	struct event *e = reserve_event();
 	if (!e) return 0;
 	fill_common(e, EV_DNS);
 	const char *node = (const char *)PT_REGS_PARM1(ctx);
 	e->str1_len = bpf_probe_read_user_str(e->str1, STR_LEN, node);
 	e->str2_len = 0;
-	bpf_ringbuf_submit(e, 0);
+	submit_event(ctx, e);
 	return 0;
 }
 
 // SSL_write(SSL *ssl, const void *buf, int num) -> outgoing TLS plaintext.
 SEC("uprobe/ssl_write")
 int uprobe_ssl_write(struct pt_regs *ctx) {
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	struct event *e = reserve_event();
 	if (!e) return 0;
 	fill_common(e, EV_TLS);
 	e->arg[0] = 1; // direction: send
@@ -414,7 +461,7 @@ int uprobe_ssl_write(struct pt_regs *ctx) {
 	if (num < 0) num = 0;
 	e->str1_len = bpf_probe_read_user(e->str1, num, buf) == 0 ? num : 0;
 	e->str2_len = 0;
-	bpf_ringbuf_submit(e, 0);
+	submit_event(ctx, e);
 	return 0;
 }
 
@@ -434,14 +481,14 @@ int uretprobe_ssl_read_ret(struct pt_regs *ctx) {
 	__u64 *buf = bpf_map_lookup_elem(&ssl_read_bufs, &tid);
 	long n = (long)PT_REGS_RC(ctx);
 	if (!buf || n <= 0) return 0;
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	struct event *e = reserve_event();
 	if (!e) return 0;
 	fill_common(e, EV_TLS);
 	e->arg[0] = 0; // direction: recv
 	if (n > STR_LEN - 1) n = STR_LEN - 1;
 	e->str1_len = bpf_probe_read_user(e->str1, n, (void *)*buf) == 0 ? n : 0;
 	e->str2_len = 0;
-	bpf_ringbuf_submit(e, 0);
+	submit_event(ctx, e);
 	bpf_map_delete_elem(&ssl_read_bufs, &tid);
 	return 0;
 }
@@ -449,12 +496,12 @@ int uretprobe_ssl_read_ret(struct pt_regs *ctx) {
 // Postgres exec_simple_query(const char *query_string) -> SQL text.
 SEC("uprobe/pg_query")
 int uprobe_pg_query(struct pt_regs *ctx) {
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	struct event *e = reserve_event();
 	if (!e) return 0;
 	fill_common(e, EV_SQL);
 	const char *q = (const char *)PT_REGS_PARM1(ctx);
 	e->str1_len = bpf_probe_read_user_str(e->str1, STR_LEN, q);
 	e->str2_len = 0;
-	bpf_ringbuf_submit(e, 0);
+	submit_event(ctx, e);
 	return 0;
 }

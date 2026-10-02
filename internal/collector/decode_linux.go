@@ -19,8 +19,8 @@ import (
 
 // rawEvent mirrors `struct event` in bpf/monitor.c byte-for-byte on amd64:
 // Go's natural field alignment matches the C compiler's on this
-// architecture, so a raw ringbuf record can be reinterpreted directly via
-// unsafe.Pointer without an explicit codec.
+// architecture, so a raw perf_event_array record's RawSample can be
+// reinterpreted directly via unsafe.Pointer without an explicit codec.
 type rawEvent struct {
 	TsNs    uint64
 	Kind    uint32

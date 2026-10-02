@@ -11,7 +11,7 @@
 | Item | Choice | Rationale |
 |---|---|---|
 | Language | Go 1.26 | Single binary, easy cross-compilation, mature cilium/ebpf ecosystem |
-| Linux kernel collection | eBPF (cilium/ebpf v0.22, CO-RE, tracepoint/kprobe/uprobe, ringbuf) | Non-intrusive, low overhead, kernel-level detail (addresses, sectors, return values) |
+| Linux kernel collection | eBPF (cilium/ebpf v0.22, CO-RE, tracepoint/kprobe/uprobe, perf_event_array) | Non-intrusive, low overhead, kernel-level detail (addresses, sectors, return values); perf_event_array over the newer `BPF_MAP_TYPE_RINGBUF` specifically because at least one BTF-capable field kernel (a patched 5.4) never backported ringbuf and rejects its creation outright — perf_event_array has been there since ~4.3 and actually runs everywhere CO-RE does |
 | Cross-platform collection | gopsutil v4 polling (Linux / macOS / Windows / FreeBSD) | Automatic fallback with no root / no eBPF |
 | System metrics | Linux: /proc; elsewhere: gopsutil | CPU, memory, disk, NIC throughput curves |
 | Storage | In-memory ring buffer (live) + SQLite (modernc, pure Go, no CGO) | No CGO keeps cross-compilation easy; history stays queryable |

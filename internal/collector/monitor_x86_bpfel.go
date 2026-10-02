@@ -24,11 +24,30 @@ type MonitorCfg struct {
 	SelfPid uint32
 }
 
+type MonitorEvent struct {
+	_       structs.HostLayout
+	TsNs    uint64
+	Kind    uint32
+	Pid     uint32
+	Tid     uint32
+	Ppid    uint32
+	Uid     uint32
+	Comm    [16]int8
+	_       [4]byte
+	Arg     [6]int64
+	Str1Len uint16
+	Str2Len uint16
+	Str1    [256]int8
+	Str2    [256]int8
+	_       [4]byte
+}
+
 // Names of all BPF objects in the ELF.
 //
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
 	MonitorMapBindAddrs            = "bind_addrs"
+	MonitorMapEventScratch         = "event_scratch"
 	MonitorMapEvents               = "events"
 	MonitorMapMonitorCfg           = "monitor_cfg"
 	MonitorMapSslReadBufs          = "ssl_read_bufs"
@@ -98,10 +117,11 @@ type MonitorProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type MonitorMapSpecs struct {
-	BindAddrs   *ebpf.MapSpec `ebpf:"bind_addrs"`
-	Events      *ebpf.MapSpec `ebpf:"events"`
-	MonitorCfg  *ebpf.MapSpec `ebpf:"monitor_cfg"`
-	SslReadBufs *ebpf.MapSpec `ebpf:"ssl_read_bufs"`
+	BindAddrs    *ebpf.MapSpec `ebpf:"bind_addrs"`
+	EventScratch *ebpf.MapSpec `ebpf:"event_scratch"`
+	Events       *ebpf.MapSpec `ebpf:"events"`
+	MonitorCfg   *ebpf.MapSpec `ebpf:"monitor_cfg"`
+	SslReadBufs  *ebpf.MapSpec `ebpf:"ssl_read_bufs"`
 }
 
 // MonitorVariableSpecs contains global variables before they are loaded into the kernel.
@@ -130,15 +150,17 @@ func (o *MonitorObjects) Close() error {
 //
 // It can be passed to LoadMonitorObjects or ebpf.CollectionSpec.LoadAndAssign.
 type MonitorMaps struct {
-	BindAddrs   *ebpf.Map `ebpf:"bind_addrs"`
-	Events      *ebpf.Map `ebpf:"events"`
-	MonitorCfg  *ebpf.Map `ebpf:"monitor_cfg"`
-	SslReadBufs *ebpf.Map `ebpf:"ssl_read_bufs"`
+	BindAddrs    *ebpf.Map `ebpf:"bind_addrs"`
+	EventScratch *ebpf.Map `ebpf:"event_scratch"`
+	Events       *ebpf.Map `ebpf:"events"`
+	MonitorCfg   *ebpf.Map `ebpf:"monitor_cfg"`
+	SslReadBufs  *ebpf.Map `ebpf:"ssl_read_bufs"`
 }
 
 func (m *MonitorMaps) Close() error {
 	return _MonitorClose(
 		m.BindAddrs,
+		m.EventScratch,
 		m.Events,
 		m.MonitorCfg,
 		m.SslReadBufs,

@@ -11,7 +11,7 @@
 | 项 | 选择 | 理由 |
 |---|---|---|
 | 语言 | Go 1.26 | 单二进制、交叉编译方便、cilium/ebpf 生态成熟 |
-| Linux 内核采集 | eBPF（cilium/ebpf v0.22，CO-RE，tracepoint/kprobe/uprobe，ringbuf） | 零侵入、低开销、可拿到内核级细节（地址、扇区、返回值） |
+| Linux 内核采集 | eBPF（cilium/ebpf v0.22，CO-RE，tracepoint/kprobe/uprobe，perf_event_array） | 零侵入、低开销、可拿到内核级细节（地址、扇区、返回值）；选 perf_event_array 而不是更新的 `BPF_MAP_TYPE_RINGBUF`，是因为实测至少有一台带 BTF 的车机内核（打过补丁的 5.4）从未反向移植 ringbuf，创建直接报 EINVAL——perf_event_array 从 ~4.3 内核就有，CO-RE 能跑的地方它都能跑 |
 | 跨平台采集 | gopsutil v4 轮询（Linux / macOS / Windows / FreeBSD） | 无 root / 无 eBPF 时自动降级 |
 | 系统指标 | Linux: /proc；其他: gopsutil | CPU、内存、磁盘、网卡吞吐曲线 |
 | 存储 | 内存环形缓冲（实时）+ SQLite（modernc 纯 Go，无 CGO） | 无 CGO 便于交叉编译；历史可查询 |
