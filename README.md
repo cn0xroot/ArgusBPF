@@ -12,18 +12,41 @@ It's the same idea as tools like [CC-Monitor](https://github.com/) that watch wh
 
 ## Screenshots
 
-<table>
-<tr><th align="left">Page</th><th>中文</th><th>English</th></tr>
-<tr><td valign="top"><b>总览 / Overview</b></td><td><img src="docs/screenshots/overview-zh.png" width="420"></td><td><img src="docs/screenshots/overview-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>实时事件 / Live Events</b></td><td><img src="docs/screenshots/live-zh.png" width="420"></td><td><img src="docs/screenshots/live-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>时间线 / Timeline</b></td><td><img src="docs/screenshots/timeline-zh.png" width="420"></td><td><img src="docs/screenshots/timeline-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>网络 / Network</b></td><td><img src="docs/screenshots/net-zh.png" width="420"></td><td><img src="docs/screenshots/net-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>磁盘 / Disk</b></td><td><img src="docs/screenshots/disk-zh.png" width="420"></td><td><img src="docs/screenshots/disk-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>内存 / Memory</b></td><td><img src="docs/screenshots/mem-zh.png" width="420"></td><td><img src="docs/screenshots/mem-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>进程 / Processes</b></td><td><img src="docs/screenshots/proc-zh.png" width="420"></td><td><img src="docs/screenshots/proc-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>告警 / Alerts</b></td><td><img src="docs/screenshots/alerts-zh.png" width="420"></td><td><img src="docs/screenshots/alerts-en.png" width="420"></td></tr>
-<tr><td valign="top"><b>知识库 / Glossary</b></td><td><img src="docs/screenshots/glossary-zh.png" width="420"></td><td><img src="docs/screenshots/glossary-en.png" width="420"></td></tr>
-</table>
+### Overview
+
+![Overview](docs/screenshots/overview-en.png)
+
+### Live Events
+
+![Live Events](docs/screenshots/live-en.png)
+
+### Timeline
+
+![Timeline](docs/screenshots/timeline-en.png)
+
+### Network
+
+![Network](docs/screenshots/net-en.png)
+
+### Disk
+
+![Disk](docs/screenshots/disk-en.png)
+
+### Memory
+
+![Memory](docs/screenshots/mem-en.png)
+
+### Processes
+
+![Processes](docs/screenshots/proc-en.png)
+
+### Alerts
+
+![Alerts](docs/screenshots/alerts-en.png)
+
+### Glossary
+
+![Glossary](docs/screenshots/glossary-en.png)
 
 ## Design
 
