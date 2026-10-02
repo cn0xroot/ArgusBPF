@@ -3,6 +3,7 @@
 需求.MD
 
 # Build output.
+/argusbpf
 /unix-monitor
 /dist/
 
@@ -11,9 +12,9 @@
 # so a plain `go build` works without clang/bpftool/root.
 /bpf/vmlinux.h
 
-# Runtime state (defaults to ~/.unix-monitor/, this only matters if someone
+# Runtime state (defaults to ~/.argusbpf/, this only matters if someone
 # points --db/--rules inside the repo during development).
-/.unix-monitor/
+/.argusbpf/
 *.db
 *.db-wal
 *.db-shm

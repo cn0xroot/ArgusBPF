@@ -5,9 +5,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"unix-monitor/internal/glossary"
-	"unix-monitor/internal/store"
-	"unix-monitor/internal/sysinfo"
+	"argusbpf/internal/agents"
+	"argusbpf/internal/glossary"
+	"argusbpf/internal/store"
+	"argusbpf/internal/sysinfo"
 )
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -48,7 +49,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		pid = int32(v)
 	}
 	f := store.Filter{
-		Cat: q.Get("cat"), Type: q.Get("type"), Risk: q.Get("risk"), Q: q.Get("q"),
+		Cat: q.Get("cat"), Type: q.Get("type"), Risk: q.Get("risk"), Q: q.Get("q"), Agent: q.Get("agent"),
 		PID: pid, Since: qInt64(r, "since", 0), Until: qInt64(r, "until", 0),
 		Before: qInt64(r, "before", 0), Limit: qInt(r, "limit", 200),
 	}
@@ -85,11 +86,16 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	if lane == "cat" {
+	switch lane {
+	case "cat":
 		for i := range tl.Lanes {
 			if zh, ok := catLabel[tl.Lanes[i].Name]; ok {
 				tl.Lanes[i].Label = zh
 			}
+		}
+	case "agent":
+		for i := range tl.Lanes {
+			tl.Lanes[i].Label = "🤖 " + agents.DisplayName(tl.Lanes[i].Name)
 		}
 	}
 	writeJSON(w, tl)
@@ -128,19 +134,19 @@ func (s *Server) handleProcessDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 	conns := sysinfo.Connections()
 	for i := range conns {
-		conns[i].Plain = connPlain(conns[i])
+		conns[i].Plain, conns[i].PlainEn = connPlain(conns[i])
 	}
 	writeJSON(w, map[string]any{"conns": conns})
 }
 
-func connPlain(c sysinfo.Conn) string {
+func connPlain(c sysinfo.Conn) (zh, en string) {
 	if c.State == "LISTEN" {
-		return c.Comm + " 正在等待外部连接进来"
+		return c.Comm + " 正在等待外部连接进来", c.Comm + " is waiting for incoming connections"
 	}
 	if c.Remote != "" {
-		return c.Comm + " 正在和 " + c.Remote + " 通信"
+		return c.Comm + " 正在和 " + c.Remote + " 通信", c.Comm + " is communicating with " + c.Remote
 	}
-	return ""
+	return "", ""
 }
 
 func (s *Server) handleDisk(w http.ResponseWriter, r *http.Request) {

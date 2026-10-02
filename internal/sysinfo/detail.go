@@ -25,12 +25,14 @@ func Detail(pid int32) (ProcDetail, bool) {
 			d.Conns = append(d.Conns, c)
 		}
 	}
-	d.Plain = describeProc(info)
+	d.Plain, d.PlainEn = describeProc(info)
 	return d, true
 }
 
-func describeProc(p ProcInfo) string {
-	return "进程 " + p.Comm + " 正在运行，占用内存约 " + humanBytes(p.RSS) + "。"
+func describeProc(p ProcInfo) (zh, en string) {
+	mb := humanBytes(p.RSS)
+	return "进程 " + p.Comm + " 正在运行，占用内存约 " + mb + "。",
+		"Process " + p.Comm + " is running, using about " + mb + " of memory."
 }
 
 func humanBytes(b uint64) string {

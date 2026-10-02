@@ -1,10 +1,90 @@
-/* Unix-Monitor — tiny canvas chart helpers (no deps) */
+/* ArgusBPF — tiny canvas chart helpers (no deps) */
 (function (global) {
   'use strict';
 
   function cssVar(name, fallback) {
     var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return v || fallback || '#888';
+  }
+
+  // ---- BeeEye-style colour field, ported from its CUDA waterfall kernel
+  // (BeeEye-agent/cuda/BeeEye_render.cu) to plain Canvas math. The GPU part
+  // doesn't carry over — there's no browser API that hands JS a CUDA
+  // context, canvas-2d is already SIMD-free CPU work — but the actual
+  // visual idea (hue = identity, brightness = magnitude, a ground→hue→hot
+  // ramp with a neighbourhood glow and perceptual gamma instead of flat
+  // alpha blending) is just colour math and ports directly. Used by
+  // Timeline below; same constants as the .cu file so a bucket and a
+  // packet-waterfall pixel "mean" the same brightness the same way.
+  var BEE_GROUND = [0.043, 0.062, 0.118], BEE_HOT = [1.0, 0.976, 0.929];
+  var BEE_CHROMA_BOOST = 1.35, BEE_GAMMA = 0.45, BEE_HOT_START = 0.62;
+  var rgbCache = {};
+  function cssToRGB01(str) {
+    if (rgbCache[str]) return rgbCache[str];
+    var c = rgbCache[str] = (function () {
+      try {
+        if (!cssToRGB01._ctx) {
+          var cv = document.createElement('canvas'); cv.width = cv.height = 1;
+          cssToRGB01._ctx = cv.getContext('2d', { willReadFrequently: true });
+        }
+        var ctx = cssToRGB01._ctx;
+        ctx.fillStyle = '#000'; ctx.fillStyle = str; // invalid strings are silently ignored, keeping '#000'
+        ctx.fillRect(0, 0, 1, 1);
+        var d = ctx.getImageData(0, 0, 1, 1).data;
+        return [d[0] / 255, d[1] / 255, d[2] / 255];
+      } catch (e) { return [0.5, 0.5, 0.5]; }
+    })();
+    return c;
+  }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  // beeEyeShade maps one bucket's hue + 0..1 intensity to a real "rgb(...)"
+  // string: saturate the hue, mix up from the dark ground by intensity,
+  // gamma-correct so quiet buckets don't vanish, bloom toward warm white
+  // once a bucket is hot enough to read as a burst rather than "more lit".
+  function beeEyeShade(hueCss, v) {
+    var hue = cssToRGB01(hueCss);
+    var lum = 0.299 * hue[0] + 0.587 * hue[1] + 0.114 * hue[2];
+    var hr = clamp01(lum + (hue[0] - lum) * BEE_CHROMA_BOOST);
+    var hg = clamp01(lum + (hue[1] - lum) * BEE_CHROMA_BOOST);
+    var hb = clamp01(lum + (hue[2] - lum) * BEE_CHROMA_BOOST);
+    v = clamp01(Math.pow(clamp01(v), BEE_GAMMA));
+    var r = BEE_GROUND[0] + (hr - BEE_GROUND[0]) * v;
+    var g = BEE_GROUND[1] + (hg - BEE_GROUND[1]) * v;
+    var b = BEE_GROUND[2] + (hb - BEE_GROUND[2]) * v;
+    if (v > BEE_HOT_START) {
+      var hot = (v - BEE_HOT_START) / (1 - BEE_HOT_START) * 0.80;
+      r += (BEE_HOT[0] - r) * hot; g += (BEE_HOT[1] - g) * hot; b += (BEE_HOT[2] - b) * hot;
+    }
+    return 'rgb(' + Math.round(clamp01(r) * 255) + ',' + Math.round(clamp01(g) * 255) + ',' + Math.round(clamp01(b) * 255) + ')';
+  }
+  // beeEyeGlow is the waterfall kernel's neighbourhood gather, collapsed to
+  // 1-D (time only — our lanes are independent categories/processes/agents,
+  // not adjacent frequency bands, so bleeding a burst *across* lanes the
+  // way the kernel bleeds across channels would blur together things that
+  // are not actually related). Radius/sigma are scaled down from the
+  // kernel's pixel-space values to bucket-space: our buckets are already a
+  // coarse 1-per-timeslot sample, not one-per-pixel.
+  function beeEyeGlow(norms, i, radius, sigma) {
+    var sum = 0, wsum = 0;
+    for (var d = -radius; d <= radius; d++) {
+      var j = i + d; if (j < 0 || j >= norms.length) continue;
+      var w = Math.exp(-(d * d) / (2 * sigma * sigma));
+      sum += norms[j] * w; wsum += w;
+    }
+    return wsum > 0 ? sum / wsum : 0;
+  }
+
+  // Accepts a bare custom-property name ("--accent"), a full var()
+  // reference ("var(--accent)", as app.js's color dictionaries use —
+  // valid in CSS but NOT something Canvas's strokeStyle/fillStyle can
+  // parse, so it must be resolved to a real color string here first — or
+  // already a literal color/hex, which passes through unchanged.
+  function resolveColor(c) {
+    if (!c) return c;
+    var m = /^var\((--[\w-]+)\s*(?:,[^)]*)?\)$/.exec(c.trim());
+    if (m) return cssVar(m[1]);
+    if (c.indexOf('--') === 0) return cssVar(c);
+    return c;
   }
 
   function setupCanvas(canvas) {
@@ -66,7 +146,7 @@
     if (this.data.length > n) this.data.splice(0, this.data.length - n);
     this.draw();
   };
-  LineChart.prototype.color = function (s) { return s.color.indexOf('--') === 0 ? cssVar(s.color) : s.color; };
+  LineChart.prototype.color = function (s) { return resolveColor(s.color); };
   LineChart.prototype.draw = function () {
     if (!this.c.offsetParent) return; // hidden
     var s = setupCanvas(this.c), ctx = s.ctx, w = s.w, h = s.h;
@@ -197,7 +277,7 @@
       var p = pts[i];
       var px = padL + (p.x - xmin) / (xmax - xmin) * cw;
       var py = padT + ch - (p.y - ymin) / (ymax - ymin) * ch;
-      var col = p.color.indexOf('--') === 0 ? cssVar(p.color) : p.color;
+      var col = resolveColor(p.color);
       ctx.globalAlpha = .75; ctx.fillStyle = col;
       ctx.beginPath(); ctx.arc(px, py, p.r || 2.5, 0, Math.PI * 2); ctx.fill();
       geo.push([px, py, p]);
@@ -234,7 +314,14 @@
   Timeline.prototype.resize = function () {
     var n = this.d && this.d.lanes ? this.d.lanes.length : 0;
     var h = Math.max(160, 30 + n * 26);
-    this.c.parentElement.style.height = h + 'px';
+    // Grow the canvas itself, not its container — "按进程/按 AI Agent" can
+    // have many lanes, and growing the container pushed the whole page
+    // (and the click-through detail panel below it) arbitrarily far down.
+    // #tlBox caps at a fixed height and scrolls internally instead (see
+    // style.css), so the rest of the page — detail panel included — stays
+    // put regardless of lane count.
+    this.c.style.height = h + 'px';
+    this.c.parentElement.style.height = '';
   };
   Timeline.prototype.geo = function () {
     var r = this.c.getBoundingClientRect();
@@ -259,16 +346,21 @@
       if (ctx.measureText(label).width > g.padL - 14) { while (label.length > 2 && ctx.measureText(label + '…').width > g.padL - 14) label = label.slice(0, -1); label += '…'; }
       ctx.fillText(label, g.padL - 8, y + g.laneH / 2);
       ctx.strokeStyle = grid; ctx.beginPath(); ctx.moveTo(g.padL, y + g.laneH + .5); ctx.lineTo(w - g.padR, y + g.laneH + .5); ctx.stroke();
-      var base = lane.color ? (lane.color.indexOf('--') === 0 ? cssVar(lane.color) : lane.color) : cssVar('--accent');
+      var base = lane.color ? resolveColor(lane.color) : cssVar('--accent');
+      // Per-bucket magnitude, log-normalised to 0..1 — this is the
+      // waterfall kernel's `intensity[]` input, computed here instead of
+      // uploaded, then glow-gathered across neighbouring time buckets
+      // exactly like the kernel gathers across neighbouring pixels.
+      var norms = lane.buckets.map(function (b) { return b && b.n ? Math.log(b.n + 1) / lmax : 0; });
       for (var bi = 0; bi < lane.buckets.length; bi++) {
         var b = lane.buckets[bi]; if (!b || !b.n) continue;
         var x = g.padL + bi * g.bw;
-        var col = (b.risk === 'high' || b.risk === 'medium') ? riskC(b.risk) : base;
-        ctx.globalAlpha = .25 + .75 * Math.log(b.n + 1) / lmax;
-        ctx.fillStyle = col;
+        var hue = (b.risk === 'high' || b.risk === 'medium') ? riskC(b.risk) : base;
+        var glow = beeEyeGlow(norms, bi, 3, 1.6);
+        var v = norms[bi] * 0.95 + glow * 0.85;
+        ctx.fillStyle = beeEyeShade(hue, v);
         ctx.fillRect(x + .5, y + 4, Math.max(1, g.bw - 1), g.laneH - 8);
       }
-      ctx.globalAlpha = 1;
     }
     var mark = this.sel || this.hov;
     [this.hov, this.sel].forEach(function (m, i) {
@@ -337,7 +429,7 @@
         x += units[j][0] * scale;
       }
       var rw = units[j][1] * scale;
-      var col = regs[j].color.indexOf('--') === 0 ? cssVar(regs[j].color) : regs[j].color;
+      var col = resolveColor(regs[j].color);
       ctx.fillStyle = col; ctx.fillRect(x, 4, Math.max(1, rw - .5), h - 8);
       geo.push([x, x + rw, regs[j]]);
       x += rw;
@@ -353,5 +445,5 @@
     hideTip();
   };
 
-  global.Charts = { LineChart: LineChart, Scatter: Scatter, Timeline: Timeline, AddrStrip: AddrStrip, cssVar: cssVar, showTip: showTip, hideTip: hideTip };
+  global.Charts = { LineChart: LineChart, Scatter: Scatter, Timeline: Timeline, AddrStrip: AddrStrip, cssVar: cssVar, resolveColor: resolveColor, showTip: showTip, hideTip: hideTip };
 })(window);

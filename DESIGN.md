@@ -1,4 +1,4 @@
-# Unix-Monitor 技术方案
+# ArgusBPF 技术方案
 
 > 目标：参考 CC-Monitor（监控 Claude Code 对电脑的操作），做一个监控**操作系统本身所有活动**的工具 ——
 > 进程、文件、网络、内存、磁盘、内核/安全事件；提供 Web UI，并同时提供
@@ -69,7 +69,7 @@
   - 每类事件带一个类比（"mmap 像向仓库申请一块货架"）。
   - 知识库页面：解释 syscall、fd、页、缺页、扇区、TCP 握手等概念。
 
-## 5. 风险规则（internal/rules，`default_rules.json`，可放 `~/.unix-monitor/rules.json` 覆盖）
+## 5. 风险规则（internal/rules，`default_rules.json`，可放 `~/.argusbpf/rules.json` 覆盖）
 
 字段与 CC-Monitor 保持一致：`id, risk, types, field, pattern(正则), title, desc`。示例：
 - high：读写 `/etc/shadow`、`/proc/*/mem`；ptrace 附加；process_vm_writev；mprotect 产生 W+X 页；加载内核模块；`/tmp` 下的可执行文件被执行
@@ -135,6 +135,6 @@
 
 ## 9. 安全 / 性能
 
-- 默认只监听 `127.0.0.1:9900`，`--listen` 可改；可选 `--token` 访问令牌。
+- 默认只监听 `127.0.0.1:1024`，`--listen` 可改；可选 `--token` 访问令牌。
 - 过滤自身 PID 防止反馈环；read/write/缺页/块 IO 内核侧计数 + 用户态 1s 合并，避免事件风暴。
 - SQLite 批量事务写入，按条数/天数自动清理（默认 50 万条 / 7 天）。

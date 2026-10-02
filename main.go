@@ -1,4 +1,4 @@
-// Command unix-monitor runs the collector, HTTP API and Web UI described
+// Command argusbpf runs the collector, HTTP API and Web UI described
 // in DESIGN.md: it watches process/file/network/memory/disk/kernel
 // activity (via eBPF on Linux/amd64 as root, falling back to a polling
 // collector everywhere else) and serves a dashboard with both a
@@ -18,20 +18,20 @@ import (
 	"syscall"
 	"time"
 
-	"unix-monitor/internal/collector"
-	"unix-monitor/internal/rules"
-	"unix-monitor/internal/server"
-	"unix-monitor/internal/store"
+	"argusbpf/internal/collector"
+	"argusbpf/internal/rules"
+	"argusbpf/internal/server"
+	"argusbpf/internal/store"
 )
 
 //go:embed web
 var webAssets embed.FS
 
 func main() {
-	listen := flag.String("listen", "127.0.0.1:9900", "HTTP listen address")
+	listen := flag.String("listen", "127.0.0.1:1024", "HTTP listen address")
 	token := flag.String("token", "", "optional access token (header X-Token or ?token=)")
-	dbPath := flag.String("db", "", "SQLite database path (default ~/.unix-monitor/events.db)")
-	rulesPath := flag.String("rules", "", "user rules.json override path (default ~/.unix-monitor/rules.json)")
+	dbPath := flag.String("db", "", "SQLite database path (default ~/.argusbpf/events.db)")
+	rulesPath := flag.String("rules", "", "user rules.json override path (default ~/.argusbpf/rules.json)")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -77,7 +77,7 @@ func main() {
 	}()
 
 	info := col.Info()
-	fmt.Printf("Unix-Monitor 已启动：http://%s （采集后端：%s）\n", *listen, info.Backend)
+	fmt.Printf("ArgusBPF 已启动：http://%s （采集后端：%s）\n", *listen, info.Backend)
 	if len(info.Warnings) > 0 {
 		fmt.Println("提示：")
 		for _, w := range info.Warnings {

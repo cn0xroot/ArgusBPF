@@ -13,7 +13,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 
-	"unix-monitor/internal/event"
+	"argusbpf/internal/event"
 )
 
 // EBPFCollector hooks the kernel via the CO-RE program in bpf/monitor.c.

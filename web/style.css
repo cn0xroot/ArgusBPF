@@ -1,55 +1,304 @@
+/* Color tokens reuse CC-Monitor's validated palette (same hue families,
+   luminance band already checked for contrast/colorblind separation —
+   see CC-Monitor/webui/public/style.css for the derivation notes) across
+   all 10 of its themes, so the two tools read as part of the same family
+   and switching themes here is never a one-off dark/light toggle. */
 :root {
-  --bg: #111217;
-  --bg-panel: #181b1f;
-  --bg-panel-2: #22252b;
-  --bg-hover: #2a2d33;
-  --border: #2d2f34;
-  --grid: rgba(204, 204, 220, .08);
-  --text: #ccccdc;
-  --text-dim: #9fa0ad;
-  --text-faint: #6e6f7a;
-  --accent: #3274d9;
-  --accent-2: #ff780a;
-  --accent-soft: rgba(50, 116, 217, .16);
-  --red: #f2495c;
-  --yellow: #fade2a;
-  --green: #73bf69;
-  --cyan: #5794f2;
-  --gray: #8e8e8e;
-  --cat-file: #5794f2;
-  --cat-process: #b877d9;
-  --cat-net: #73bf69;
-  --cat-memory: #ff9830;
-  --cat-disk: #f2cc0c;
-  --cat-kernel: #8ab8ff;
-  --cat-security: #f2495c;
-  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
   --radius: 4px;
   --mono: "Roboto Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", Roboto, sans-serif;
+  /* Appearance-settings overrides (see #settingsModal / app.js initSettings) */
+  --app-font: var(--sans);
+  --app-font-size: 14px;
+}
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --bg-panel: #151822;
+  --bg-panel-2: #1c202c;
+  --bg-hover: #262b3a;
+  --border: #262b3a;
+  --grid: rgba(122, 128, 148, 0.12);
+  --text: #d8dce6;
+  --text-dim: #7a8094;
+  --text-faint: #4a4e5b;
+  --accent: #4f8cff;
+  --accent-2: #c792ea;
+  --accent-soft: rgba(79, 140, 255, 0.16);
+  --red: #ff5f6d;
+  --yellow: #e6b450;
+  --green: #4fd18b;
+  --cyan: #57c7ff;
+  --gray: #7a8094;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
-  --bg: #f4f5f5;
+  --bg: #f5f6f8;
   --bg-panel: #ffffff;
-  --bg-panel-2: #f4f5f5;
-  --bg-hover: #e9eaec;
-  --border: #dcdee1;
-  --grid: rgba(36, 41, 46, .1);
-  --text: #24292e;
-  --text-dim: #5d6369;
-  --text-faint: #8e9399;
-  --accent: #3871dc;
-  --accent-2: #ff780a;
-  --accent-soft: rgba(56, 113, 220, .1);
-  --red: #e02f44;
-  --yellow: #c79a00;
-  --green: #37872d;
-  --cyan: #3274d9;
-  --gray: #8e9399;
-  --cat-disk: #c79a00;
-  --cat-net: #37872d;
+  --bg-panel-2: #eef0f4;
+  --bg-hover: #d8dce4;
+  --border: #d8dce4;
+  --grid: rgba(107, 114, 128, 0.1);
+  --text: #1c2029;
+  --text-dim: #6b7280;
+  --text-faint: #a9adb6;
+  --accent: #2f6fed;
+  --accent-2: #9333c6;
+  --accent-soft: rgba(47, 111, 237, 0.1);
+  --red: #d6304a;
+  --yellow: #b3790a;
+  --green: #1f8f5f;
+  --cyan: #0e83a8;
+  --gray: #6b7280;
+  --cat-file: #3aa6a6;
+  --cat-process: #7c5fd0;
+  --cat-net: #8e80d8;
+  --cat-memory: #a87b10;
+  --cat-disk: #e45c36;
+  --cat-kernel: #2f86c8;
+  --cat-security: #d4508b;
+  --shadow: 0 6px 24px rgba(30, 35, 45, .15);
+  color-scheme: light;
+}
+
+:root[data-theme="dracula"] {
+  --bg: #191a21;
+  --bg-panel: #21222c;
+  --bg-panel-2: #2b2d3a;
+  --bg-hover: #3c3f52;
+  --border: #3c3f52;
+  --grid: rgba(154, 156, 176, 0.12);
+  --text: #f8f8f2;
+  --text-dim: #9a9cb0;
+  --text-faint: #606270;
+  --accent: #bd93f9;
+  --accent-2: #ff79c6;
+  --accent-soft: rgba(189, 147, 249, 0.16);
+  --red: #ff5555;
+  --yellow: #f1fa8c;
+  --green: #50fa7b;
+  --cyan: #8be9fd;
+  --gray: #9a9cb0;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+:root[data-theme="nord"] {
+  --bg: #2e3440;
+  --bg-panel: #3b4252;
+  --bg-panel-2: #434c5e;
+  --bg-hover: #4c566a;
+  --border: #4c566a;
+  --grid: rgba(154, 165, 184, 0.12);
+  --text: #eceff4;
+  --text-dim: #9aa5b8;
+  --text-faint: #697282;
+  --accent: #88c0d0;
+  --accent-2: #b48ead;
+  --accent-soft: rgba(136, 192, 208, 0.16);
+  --red: #bf616a;
+  --yellow: #ebcb8b;
+  --green: #a3be8c;
+  --cyan: #8fbcbb;
+  --gray: #9aa5b8;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+:root[data-theme="midnight"] {
+  --bg: #07080f;
+  --bg-panel: #0d1117;
+  --bg-panel-2: #111827;
+  --bg-hover: #1e2a3a;
+  --border: #1e2a3a;
+  --grid: rgba(100, 116, 139, 0.12);
+  --text: #f1f5f9;
+  --text-dim: #64748b;
+  --text-faint: #3a4353;
+  --accent: #6366f1;
+  --accent-2: #a78bfa;
+  --accent-soft: rgba(99, 102, 241, 0.16);
+  --red: #f87171;
+  --yellow: #f59e0b;
+  --green: #10b981;
+  --cyan: #38bdf8;
+  --gray: #64748b;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+:root[data-theme="ocean"] {
+  --bg: #060d14;
+  --bg-panel: #091825;
+  --bg-panel-2: #0d2035;
+  --bg-hover: #163550;
+  --border: #163550;
+  --grid: rgba(74, 122, 155, 0.12);
+  --text: #e0f2fe;
+  --text-dim: #4a7a9b;
+  --text-faint: #2b495e;
+  --accent: #0ea5e9;
+  --accent-2: #a78bfa;
+  --accent-soft: rgba(14, 165, 233, 0.16);
+  --red: #f87171;
+  --yellow: #f59e0b;
+  --green: #10b981;
+  --cyan: #22d3ee;
+  --gray: #4a7a9b;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+:root[data-theme="forest"] {
+  --bg: #030b05;
+  --bg-panel: #071a0a;
+  --bg-panel-2: #0c2412;
+  --bg-hover: #183d20;
+  --border: #183d20;
+  --grid: rgba(74, 122, 90, 0.12);
+  --text: #dcfce7;
+  --text-dim: #4a7a5a;
+  --text-faint: #2a4834;
+  --accent: #22c55e;
+  --accent-2: #a78bfa;
+  --accent-soft: rgba(34, 197, 94, 0.16);
+  --red: #f87171;
+  --yellow: #f59e0b;
+  --green: #10b981;
+  --cyan: #2dd4bf;
+  --gray: #4a7a5a;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+:root[data-theme="sunset"] {
+  --bg: #0d0804;
+  --bg-panel: #1a1208;
+  --bg-panel-2: #231a0d;
+  --bg-hover: #3d2e18;
+  --border: #3d2e18;
+  --grid: rgba(122, 90, 58, 0.12);
+  --text: #fff7ed;
+  --text-dim: #7a5a3a;
+  --text-faint: #493522;
+  --accent: #f97316;
+  --accent-2: #f472b6;
+  --accent-soft: rgba(249, 115, 22, 0.16);
+  --red: #ef4444;
+  --yellow: #fbbf24;
+  --green: #10b981;
+  --cyan: #22d3ee;
+  --gray: #7a5a3a;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+:root[data-theme="rose"] {
+  --bg: #0d0610;
+  --bg-panel: #160b1e;
+  --bg-panel-2: #200f2c;
+  --bg-hover: #3a1f4a;
+  --border: #3a1f4a;
+  --grid: rgba(122, 74, 122, 0.12);
+  --text: #fdf4ff;
+  --text-dim: #7a4a7a;
+  --text-faint: #492b4a;
+  --accent: #ec4899;
+  --accent-2: #a855f7;
+  --accent-soft: rgba(236, 72, 153, 0.16);
+  --red: #f87171;
+  --yellow: #f59e0b;
+  --green: #10b981;
+  --cyan: #22d3ee;
+  --gray: #7a4a7a;
+  --cat-file: #2e8b8b;
+  --cat-process: #8265e0;
+  --cat-net: #7a6bc7;
+  --cat-memory: #b88e22;
+  --cat-disk: #e7643d;
+  --cat-kernel: #3e8fd4;
+  --cat-security: #dc5a91;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+:root[data-theme="brand"] {
+  --bg: #f4f0f1;
+  --bg-panel: #f9f5e6;
+  --bg-panel-2: #ffffff;
+  --bg-hover: #c1d3da;
+  --border: #c1d3da;
+  --grid: rgba(107, 111, 138, 0.1);
+  --text: #201f3a;
+  --text-dim: #6b6f8a;
+  --text-faint: #a9a9b8;
+  --accent: #4757e8;
+  --accent-2: #eb9dff;
+  --accent-soft: rgba(71, 87, 232, 0.1);
+  --red: #ec5615;
+  --yellow: #ff9d43;
+  --green: #10c378;
+  --cyan: #4757e8;
+  --gray: #6b6f8a;
+  --cat-file: #3aa6a6;
+  --cat-process: #7c5fd0;
+  --cat-net: #8e80d8;
+  --cat-memory: #a87b10;
+  --cat-disk: #e45c36;
+  --cat-kernel: #2f86c8;
+  --cat-security: #d4508b;
   --shadow: 0 6px 24px rgba(30, 35, 45, .15);
   color-scheme: light;
 }
@@ -59,10 +308,13 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 var(--sans);
+  font: var(--app-font-size) / 1.5 var(--app-font);
   overflow-x: hidden;
   min-height: 100vh;
 }
+/* Browsers don't make form controls inherit font-family by default — see
+   CC-Monitor's own note on this exact gotcha. */
+button, input, select, textarea { font-family: inherit; }
 a { color: var(--accent); text-decoration: none; }
 button, input, select { font: inherit; color: inherit; }
 code, .mono { font-family: var(--mono); font-size: 12.5px; }
@@ -246,6 +498,7 @@ td.wrap { word-break: break-all; }
   display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 5px;
   background: var(--bg-panel-2); border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap;
 }
+.agent-tag { color: var(--accent-2); border-color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
 tr.risk-high td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 tr.risk-medium td:first-child { box-shadow: inset 3px 0 0 var(--yellow); }
 
@@ -267,6 +520,11 @@ tr.risk-medium td:first-child { box-shadow: inset 3px 0 0 var(--yellow); }
 .chart { position: relative; height: 170px; }
 .chart canvas { width: 100%; height: 100%; display: block; }
 .chart.tall { height: 260px; }
+/* Timeline: height follows lane count (set on the canvas itself, not this
+   box — see Timeline.prototype.resize), capped and internally scrollable
+   so "按进程/按 AI Agent" with many lanes can't push the rest of the page
+   — including the click-through detail panel below it — out of reach. */
+#tlBox { height: auto; max-height: 420px; overflow-y: auto; overflow-x: hidden; }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .legend i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
@@ -326,6 +584,40 @@ tr.risk-medium td:first-child { box-shadow: inset 3px 0 0 var(--yellow); }
 .plain-box {
   background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 10px 12px; border-radius: 8px; margin: 8px 0;
 }
+
+/* ---------- appearance settings modal ---------- */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 110; background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal-backdrop[hidden] { display: none; }
+.modal {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); width: min(420px, 100%); max-height: 90vh; overflow-y: auto;
+  padding: 18px 20px;
+}
+.modal h3 { margin: 0 0 14px; font-size: 16px; }
+.modal .field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; font-size: 13px; color: var(--text-dim); }
+.modal .field select, .modal .field input[type="range"] { width: 100%; }
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.theme-swatch {
+  display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 4px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel-2); cursor: pointer; color: var(--text);
+}
+.theme-swatch:hover { border-color: var(--text-faint); }
+.theme-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.theme-swatch .dots { display: flex; gap: 3px; }
+.theme-swatch .dots i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.theme-swatch .name { font-size: 11px; }
+.font-preview {
+  margin-bottom: 14px; padding: 10px 12px; border-radius: 8px; background: var(--bg-panel-2);
+  border: 1px solid var(--border); font-size: var(--app-font-size); font-family: var(--app-font); color: var(--text);
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.btn-secondary { background: var(--bg-panel-2); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 6px 14px; cursor: pointer; }
+.btn-secondary:hover { background: var(--bg-hover); }
+.btn-primary { background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: var(--radius); padding: 6px 14px; cursor: pointer; }
+.btn-primary:hover { filter: brightness(1.1); }
 
 /* ---------- drawer ---------- */
 .drawer-mask { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 90; display: none; }

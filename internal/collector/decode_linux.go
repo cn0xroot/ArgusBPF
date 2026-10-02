@@ -13,8 +13,8 @@ import (
 	"time"
 	"unsafe"
 
-	"unix-monitor/internal/event"
-	"unix-monitor/internal/sysinfo"
+	"argusbpf/internal/event"
+	"argusbpf/internal/sysinfo"
 )
 
 // rawEvent mirrors `struct event` in bpf/monitor.c byte-for-byte on amd64:

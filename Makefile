@@ -1,4 +1,4 @@
-BINARY  := unix-monitor
+BINARY  := argusbpf
 PKG     := ./internal/collector
 BPF_SRC := bpf/monitor.c
 VMLINUX := bpf/vmlinux.h

@@ -5,10 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"unix-monitor/internal/event"
-	"unix-monitor/internal/explain"
-	"unix-monitor/internal/rules"
-	"unix-monitor/internal/store"
+	"argusbpf/internal/agents"
+	"argusbpf/internal/event"
+	"argusbpf/internal/explain"
+	"argusbpf/internal/rules"
+	"argusbpf/internal/store"
 )
 
 // Pipeline turns raw collector events into stored, explained, broadcast
@@ -50,6 +51,9 @@ func (p *Pipeline) Ingest(ev *event.Event) {
 	}
 	explain.Apply(ev)
 	p.rules.Evaluate(ev)
+	if a := agents.Match(ev.Comm, ev.Exe); a != nil {
+		ev.Agent, ev.AgentDisplay = a.ID, a.Display
+	}
 
 	key, agg := aggregateKey(ev)
 	if !agg {
@@ -65,8 +69,9 @@ func (p *Pipeline) Ingest(ev *event.Event) {
 		// one that touched /etc/shadow under a later, boring sample.
 		if ev.Risk.Rank() >= cur.Risk.Rank() {
 			cur.Fields = ev.Fields
-			cur.Risk, cur.Rule, cur.RuleTitle = ev.Risk, ev.Rule, ev.RuleTitle
+			cur.Risk, cur.Rule, cur.RuleTitle, cur.RuleTitleEn = ev.Risk, ev.Rule, ev.RuleTitle, ev.RuleTitleEn
 			cur.Pro, cur.Plain, cur.Analogy = ev.Pro, ev.Plain, ev.Analogy
+			cur.TitleEn, cur.PlainEn, cur.AnalogyEn = ev.TitleEn, ev.PlainEn, ev.AnalogyEn
 		}
 		p.mu.Unlock()
 		return

@@ -46,7 +46,7 @@ func readMaps(pid int32) ([]MemMap, map[string]uint64) {
 			Path: path,
 		}
 		m.Kind = classifyMap(m)
-		m.Plain = explainMapKind(m)
+		m.Plain, m.PlainEn = explainMapKind(m)
 		summary[m.Kind] += m.Size
 		maps = append(maps, m)
 	}
@@ -76,27 +76,28 @@ func classifyMap(m MemMap) string {
 	}
 }
 
-func explainMapKind(m MemMap) string {
+func explainMapKind(m MemMap) (zh, en string) {
 	switch m.Kind {
 	case "heap":
-		return "程序动态申请的「堆」内存，存放运行时创建的数据"
+		return "程序动态申请的「堆」内存，存放运行时创建的数据", "The program's dynamically-allocated \"heap\" memory, holding data created at runtime"
 	case "stack":
-		return "线程的「栈」，存放函数调用的临时变量"
+		return "线程的「栈」，存放函数调用的临时变量", "A thread's \"stack\", holding temporary variables from function calls"
 	case "lib":
-		return "加载的共享库（.so），像是借用的公共工具书"
+		return "加载的共享库（.so），像是借用的公共工具书", "A loaded shared library (.so) — like a borrowed reference book"
 	case "code":
-		return "程序自身的可执行代码段"
+		return "程序自身的可执行代码段", "The program's own executable code segment"
 	case "vdso":
-		return "内核提供的加速访问区域（vDSO），不是程序自己的内存"
+		return "内核提供的加速访问区域（vDSO），不是程序自己的内存", "A kernel-provided fast-access region (vDSO) — not the program's own memory"
 	case "shm":
-		return "与其它进程共享的内存区域"
+		return "与其它进程共享的内存区域", "A memory region shared with other processes"
 	case "file":
-		return "把文件直接映射进内存使用（内存映射文件）"
+		return "把文件直接映射进内存使用（内存映射文件）", "A file mapped directly into memory for use (memory-mapped file)"
 	default:
 		if strings.Contains(m.Perms, "w") && strings.Contains(m.Perms, "x") {
-			return "⚠️ 一块同时可写又可执行的匿名内存，常见于高级攻击手法（代码注入）"
+			return "⚠️ 一块同时可写又可执行的匿名内存，常见于高级攻击手法（代码注入）",
+				"⚠️ A block of anonymous memory that's both writable and executable — common in advanced attack techniques (code injection)"
 		}
-		return "匿名内存区域，常用于临时缓冲区"
+		return "匿名内存区域，常用于临时缓冲区", "An anonymous memory region, commonly used as a temporary buffer"
 	}
 }
 
@@ -127,22 +128,23 @@ func readFDs(pid int32) []FD {
 		case strings.HasPrefix(target, "/"):
 			kind = "file"
 		}
-		out = append(out, FD{FD: n, Target: target, Kind: kind, Plain: explainFDKind(kind, target)})
+		zh, en := explainFDKind(kind, target)
+		out = append(out, FD{FD: n, Target: target, Kind: kind, Plain: zh, PlainEn: en})
 	}
 	return out
 }
 
-func explainFDKind(kind, target string) string {
+func explainFDKind(kind, target string) (zh, en string) {
 	switch kind {
 	case "socket":
-		return "一个网络连接的句柄"
+		return "一个网络连接的句柄", "A network connection handle"
 	case "pipe":
-		return "进程间通信的管道"
+		return "进程间通信的管道", "An inter-process communication pipe"
 	case "file":
-		return "打开的文件：" + target
+		return "打开的文件：" + target, "An open file: " + target
 	case "dev":
-		return "打开的设备文件：" + target
+		return "打开的设备文件：" + target, "An open device file: " + target
 	default:
-		return "内核对象句柄"
+		return "内核对象句柄", "A kernel object handle"
 	}
 }

@@ -7,8 +7,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"unix-monitor/internal/event"
-	"unix-monitor/internal/sysinfo"
+	"argusbpf/internal/event"
+	"argusbpf/internal/sysinfo"
 )
 
 // wsMsg is the envelope sent over /ws: {"t":"events","d":[...]} or

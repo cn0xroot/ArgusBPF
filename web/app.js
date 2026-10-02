@@ -1,9 +1,10 @@
-/* Unix-Monitor — main page logic (no deps, loaded after charts.js) */
+/* ArgusBPF — main page logic (no deps, loaded after charts.js) */
 (function () {
   'use strict';
 
   var TOKEN = new URLSearchParams(location.search).get('token') || '';
   var EV = new Map();       // id -> event, shared cache for all tables + drawer
+  var glossaryRebuildCats = null, glossaryRender = null; // set once initGlossary() runs; re-invoked on language change
   var state = {
     mode: 'plain',
     theme: '',
@@ -12,26 +13,44 @@
     page: 'overview',
   };
 
+  // Labels below are i18n keys (see i18n.js), not literal text — resolve
+  // with riskLabel()/catLabel()/memkindLabel() so they follow the current
+  // language instead of being baked in at load time.
   var CAT = {
-    file: { zh: '文件', color: 'var(--cat-file)' },
-    process: { zh: '进程', color: 'var(--cat-process)' },
-    net: { zh: '网络', color: 'var(--cat-net)' },
-    memory: { zh: '内存', color: 'var(--cat-memory)' },
-    disk: { zh: '磁盘', color: 'var(--cat-disk)' },
-    kernel: { zh: '内核', color: 'var(--cat-kernel)' },
-    security: { zh: '安全', color: 'var(--cat-security)' },
+    file: { key: 'cat.file', color: 'var(--cat-file)' },
+    process: { key: 'cat.process', color: 'var(--cat-process)' },
+    net: { key: 'cat.net', color: 'var(--cat-net)' },
+    memory: { key: 'cat.memory', color: 'var(--cat-memory)' },
+    disk: { key: 'cat.disk', color: 'var(--cat-disk)' },
+    kernel: { key: 'cat.kernel', color: 'var(--cat-kernel)' },
+    security: { key: 'cat.security', color: 'var(--cat-security)' },
   };
-  var RISK_LABEL = { info: '信息', low: '低', medium: '中', high: '高' };
   var MEMKIND = {
-    code: { zh: '代码', color: 'var(--cat-memory)' },
-    heap: { zh: '堆', color: 'var(--cyan)' },
-    stack: { zh: '栈', color: 'var(--accent)' },
-    lib: { zh: '共享库', color: 'var(--green)' },
-    anon: { zh: '匿名', color: 'var(--yellow)' },
-    vdso: { zh: 'vDSO', color: 'var(--gray)' },
-    file: { zh: '文件映射', color: 'var(--cat-file)' },
-    shm: { zh: '共享内存', color: 'var(--cat-disk)' },
+    code: { key: 'memkind.code', color: 'var(--cat-memory)' },
+    heap: { key: 'memkind.heap', color: 'var(--cyan)' },
+    stack: { key: 'memkind.stack', color: 'var(--accent)' },
+    lib: { key: 'memkind.lib', color: 'var(--green)' },
+    anon: { key: 'memkind.anon', color: 'var(--yellow)' },
+    vdso: { key: 'memkind.vdso', color: 'var(--gray)' },
+    file: { key: 'memkind.file', color: 'var(--cat-file)' },
+    shm: { key: 'memkind.shm', color: 'var(--cat-disk)' },
   };
+  function riskLabel(r) { return I18N.t('risk.' + (r || 'info')); }
+  // Event/rule/glossary content is generated server-side with a Chinese
+  // field plus an "_en" twin (see internal/explain, internal/rules,
+  // internal/glossary) — pick the right one for the current UI language,
+  // falling back to Chinese if an _en value wasn't set for some reason.
+  function evText(o, field) {
+    if (I18N.lang() === 'en') {
+      var en = o[field + '_en'];
+      if (en) return en;
+    }
+    return o[field] || '';
+  }
+  function catLabel(c) { var e = CAT[c]; return e ? I18N.t(e.key) : c; }
+  function catColor(c) { return (CAT[c] || {}).color || 'var(--gray)'; }
+  function memkindLabel(k) { var e = MEMKIND[k]; return e ? I18N.t(e.key) : k; }
+  function memkindColor(k) { return (MEMKIND[k] || {}).color || 'var(--text-faint)'; }
 
   // ---------------- tiny utils ----------------
   function esc(s) {
@@ -72,23 +91,25 @@
 
   // ---------------- event rendering (shared across live/timeline/net/mem/alerts) ----------------
   function evHeadHTML() {
-    return '<tr><th style="width:68px">时间</th><th style="width:56px">风险</th><th style="width:120px">类别</th><th style="width:140px">进程</th><th>说明</th></tr>';
+    return '<tr><th style="width:68px">' + esc(I18N.t('th.time')) + '</th><th style="width:56px">' + esc(I18N.t('th.risk')) +
+      '</th><th style="width:120px">' + esc(I18N.t('th.cat')) + '</th><th style="width:140px">' + esc(I18N.t('th.process')) +
+      '</th><th>' + esc(I18N.t('th.desc')) + '</th></tr>';
   }
   function evRowHTML(ev) {
     EV.set(ev.id, ev);
     var risk = ev.risk || 'info';
-    var cat = CAT[ev.cat] || { zh: ev.cat, color: 'var(--gray)' };
     var cnt = ev.count > 1 ? ' <span class="tag">×' + ev.count + '</span>' : '';
     return '<tr class="click risk-' + risk + '" data-id="' + ev.id + '">' +
       '<td class="nowrap mono" title="' + esc(new Date(ev.ts).toLocaleString()) + '">' + fmtTime(ev.ts) + '</td>' +
-      '<td><span class="risk ' + risk + '">' + RISK_LABEL[risk] + '</span></td>' +
-      '<td class="nowrap"><span class="cat" style="--c:' + cat.color + '">' + cat.zh + '</span> <span class="pro-only tag">' + esc(ev.type) + '</span></td>' +
-      '<td class="nowrap">' + esc(ev.comm || ('pid ' + ev.pid)) + ' <span class="dim pro-only">#' + ev.pid + '</span></td>' +
+      '<td><span class="risk ' + risk + '">' + riskLabel(risk) + '</span></td>' +
+      '<td class="nowrap"><span class="cat" style="--c:' + catColor(ev.cat) + '">' + esc(catLabel(ev.cat)) + '</span> <span class="pro-only tag">' + esc(ev.type) + '</span></td>' +
+      '<td class="nowrap">' + esc(ev.comm || ('pid ' + ev.pid)) + ' <span class="dim pro-only">#' + ev.pid + '</span>' +
+      (ev.agent_display ? ' <span class="tag agent-tag">🤖 ' + esc(ev.agent_display) + '</span>' : '') + '</td>' +
       '<td>' +
-      '<div class="plain-only ev-plain">' + esc(ev.plain || ev.title || '') + '</div>' +
-      (ev.analogy ? '<div class="plain-only ev-analogy">' + esc(ev.analogy) + '</div>' : '') +
-      '<div class="pro-only ev-pro">' + esc(ev.pro || ev.title || '') + '</div>' +
-      (ev.rule_title ? '<div class="tag" style="margin-top:3px">⚑ ' + esc(ev.rule_title) + '</div>' : '') +
+      '<div class="plain-only ev-plain">' + esc(evText(ev, 'plain') || evText(ev, 'title') || '') + '</div>' +
+      (ev.analogy ? '<div class="plain-only ev-analogy">' + esc(evText(ev, 'analogy')) + '</div>' : '') +
+      '<div class="pro-only ev-pro">' + esc(ev.pro || evText(ev, 'title') || '') + '</div>' +
+      (ev.rule_title ? '<div class="tag" style="margin-top:3px">⚑ ' + esc(evText(ev, 'rule_title')) + '</div>' : '') +
       cnt +
       '</td></tr>';
   }
@@ -107,28 +128,29 @@
     var ev = EV.get(id);
     if (!ev) return;
     var risk = ev.risk || 'info';
-    document.getElementById('drTitle').textContent = ev.rule_title || ev.title || ev.type;
+    document.getElementById('drTitle').textContent = evText(ev, 'rule_title') || evText(ev, 'title') || ev.type;
     document.getElementById('drSub').innerHTML =
-      '<span class="risk ' + risk + '">' + RISK_LABEL[risk] + '</span> &nbsp;' +
+      '<span class="risk ' + risk + '">' + riskLabel(risk) + '</span> &nbsp;' +
       esc(ev.cat + ':' + ev.type) + ' &nbsp;' + esc(new Date(ev.ts).toLocaleString());
     var fieldsRows = '';
     if (ev.fields) for (var k in ev.fields) fieldsRows += '<tr><td>' + esc(k) + '</td><td>' + esc(ev.fields[k]) + '</td></tr>';
     var body =
       '<section>' +
-      '<h4>通俗解释</h4>' +
-      '<div class="plain-box">' + esc(ev.plain || '') + (ev.analogy ? '<div class="ev-analogy" style="margin-top:6px">' + esc(ev.analogy) + '</div>' : '') + '</div>' +
+      '<h4>' + esc(I18N.t('drawer.plain')) + '</h4>' +
+      '<div class="plain-box">' + esc(evText(ev, 'plain')) + (ev.analogy ? '<div class="ev-analogy" style="margin-top:6px">' + esc(evText(ev, 'analogy')) + '</div>' : '') + '</div>' +
       '</section>' +
       '<section>' +
-      '<h4>进程信息</h4>' +
+      '<h4>' + esc(I18N.t('drawer.procInfo')) + '</h4>' +
       '<dl class="kv">' +
-      '<dt>进程</dt><dd>' + esc(ev.comm) + ' (pid ' + ev.pid + (ev.ppid ? ', ppid ' + ev.ppid : '') + ')</dd>' +
-      (ev.user ? '<dt>用户</dt><dd>' + esc(ev.user) + ' (uid ' + ev.uid + ')</dd>' : '') +
-      (ev.exe ? '<dt>程序路径</dt><dd class="mono">' + esc(ev.exe) + '</dd>' : '') +
+      '<dt>' + esc(I18N.t('drawer.process')) + '</dt><dd>' + esc(ev.comm) + ' (pid ' + ev.pid + (ev.ppid ? ', ppid ' + ev.ppid : '') + ')</dd>' +
+      (ev.agent_display ? '<dt>AI Agent</dt><dd>🤖 ' + esc(ev.agent_display) + '</dd>' : '') +
+      (ev.user ? '<dt>' + esc(I18N.t('drawer.user')) + '</dt><dd>' + esc(ev.user) + ' (uid ' + ev.uid + ')</dd>' : '') +
+      (ev.exe ? '<dt>' + esc(I18N.t('drawer.exePath')) + '</dt><dd class="mono">' + esc(ev.exe) + '</dd>' : '') +
       '</dl>' +
       '</section>' +
-      (ev.rule_title ? '<section><h4>命中规则</h4><div class="plain-box" style="border-left-color:var(--red)"><b>' + esc(ev.rule_title) + '</b><div class="dim" style="margin-top:4px">规则 ID: ' + esc(ev.rule) + '</div></div></section>' : '') +
+      (ev.rule_title ? '<section><h4>' + esc(I18N.t('drawer.ruleHit')) + '</h4><div class="plain-box" style="border-left-color:var(--red)"><b>' + esc(evText(ev, 'rule_title')) + '</b><div class="dim" style="margin-top:4px">' + esc(I18N.t('drawer.ruleId')) + ': ' + esc(ev.rule) + '</div></div></section>' : '') +
       '<section>' +
-      '<details class="alt" open><summary>技术细节</summary>' +
+      '<details class="alt" open><summary>' + esc(I18N.t('drawer.techDetail')) + '</summary>' +
       '<div class="code-block mt">' + esc(ev.pro || '') + '</div>' +
       (fieldsRows ? '<table class="fields mt"><tbody>' + fieldsRows + '</tbody></table>' : '') +
       '</details>' +
@@ -152,10 +174,38 @@
     document.querySelectorAll('#modeSeg button').forEach(function (b) { b.classList.toggle('on', b.dataset.mode === m); });
     try { localStorage.setItem('umon.mode', m); } catch (e) {}
   }
+  var THEMES = ['dark', 'light', 'dracula', 'nord', 'midnight', 'ocean', 'forest', 'sunset', 'rose', 'brand'];
   function applyTheme(t) {
+    if (THEMES.indexOf(t) === -1) t = 'dark';
     state.theme = t;
-    if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', t);
     try { localStorage.setItem('umon.theme', t); } catch (e) {}
+    document.querySelectorAll('#themeGrid .theme-swatch').forEach(function (el) { el.classList.toggle('on', el.dataset.theme === t); });
+  }
+  // [bg, accent] per theme, just for the swatch preview dots — can't read
+  // these via getComputedStyle without actually switching the real
+  // document's data-theme (CSS `:root[data-theme=X]` only ever matches
+  // <html>, never an arbitrary probe element), and flipping the whole
+  // page through all 10 themes to sample them would flash on screen, so
+  // this one small, deliberately duplicated table is the lesser evil.
+  var THEME_SWATCH = {
+    dark: ['#0f1115', '#4f8cff'], light: ['#f5f6f8', '#2f6fed'], dracula: ['#191a21', '#bd93f9'],
+    nord: ['#2e3440', '#88c0d0'], midnight: ['#07080f', '#6366f1'], ocean: ['#060d14', '#0ea5e9'],
+    forest: ['#030b05', '#22c55e'], sunset: ['#0d0804', '#f97316'], rose: ['#0d0610', '#ec4899'],
+    brand: ['#f4f0f1', '#4757e8'],
+  };
+  function buildThemeGrid() {
+    var grid = document.getElementById('themeGrid');
+    if (!grid || grid.childElementCount) return; // build once; applyTheme() re-highlights on change
+    grid.innerHTML = THEMES.map(function (name) {
+      var c = THEME_SWATCH[name];
+      return '<button type="button" class="theme-swatch" data-theme="' + name + '">' +
+        '<span class="dots"><i style="background:' + c[0] + '"></i><i style="background:' + c[1] + '"></i></span>' +
+        '<span class="name" data-i18n="theme.' + name + '">' + esc(I18N.t('theme.' + name)) + '</span></button>';
+    }).join('');
+    grid.querySelectorAll('.theme-swatch').forEach(function (el) {
+      el.addEventListener('click', function () { applyTheme(el.dataset.theme); });
+    });
   }
   function setRange(sec, label, since, until) {
     state.range = { sec: sec, label: label, since: since || null, until: until || null };
@@ -167,20 +217,77 @@
     return { since: Date.now() - state.range.sec * 1000, until: Date.now() };
   }
 
+  var FONT_STACKS = {
+    system: 'var(--sans)',
+    mono: 'var(--mono)',
+    serif: 'Georgia, "Noto Serif CJK SC", "Songti SC", serif',
+    kaiti: '"STKaiti", "Kaiti SC", KaiTi, "AR PL UKai CN", serif',
+    heiti: '"PingFang SC", "Microsoft YaHei", "Heiti SC", sans-serif',
+    songti: '"Songti SC", SimSun, serif',
+  };
+  function applyFont(fam) {
+    if (!FONT_STACKS[fam]) fam = 'system';
+    document.documentElement.style.setProperty('--app-font', FONT_STACKS[fam]);
+    try { localStorage.setItem('umon.font', fam); } catch (e) {}
+    var sel = document.getElementById('fontFamilySel'); if (sel) sel.value = fam;
+  }
+  function applyFontSize(px) {
+    px = Math.max(12, Math.min(18, Number(px) || 14));
+    document.documentElement.style.setProperty('--app-font-size', px + 'px');
+    try { localStorage.setItem('umon.fontSize', px); } catch (e) {}
+    var r = document.getElementById('fontSizeRange'), v = document.getElementById('fontSizeVal');
+    if (r) r.value = px; if (v) v.textContent = px;
+  }
+  function openSettings() { buildThemeGrid(); applyTheme(state.theme); document.getElementById('settingsModal').hidden = false; }
+  function closeSettings() { document.getElementById('settingsModal').hidden = true; }
+
   function initChrome() {
     try {
       var m = localStorage.getItem('umon.mode');
       applyMode(m === 'pro' ? 'pro' : 'plain');
-      var t = localStorage.getItem('umon.theme');
-      if (t) applyTheme(t);
+      applyTheme(localStorage.getItem('umon.theme'));
+      applyFont(localStorage.getItem('umon.font'));
+      applyFontSize(localStorage.getItem('umon.fontSize') || 14);
     } catch (e) { applyMode('plain'); }
 
     document.getElementById('modeSeg').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-mode]'); if (b) applyMode(b.dataset.mode);
     });
-    document.getElementById('themeBtn').addEventListener('click', function () {
-      var cur = document.documentElement.getAttribute('data-theme');
-      applyTheme(cur === 'light' ? '' : 'light');
+    document.getElementById('settingsBtn').addEventListener('click', openSettings);
+    document.getElementById('settingsCloseBtn').addEventListener('click', closeSettings);
+    document.getElementById('settingsModal').addEventListener('click', function (e) { if (e.target.id === 'settingsModal') closeSettings(); });
+    document.getElementById('fontFamilySel').addEventListener('change', function () { applyFont(this.value); });
+    document.getElementById('fontSizeRange').addEventListener('input', function () { applyFontSize(this.value); });
+    document.getElementById('settingsResetBtn').addEventListener('click', function () {
+      applyTheme('dark'); applyFont('system'); applyFontSize(14);
+    });
+
+    // Language: a 2-segment control (not a single ambiguous toggle button)
+    // so which language is active is always visually obvious at a glance.
+    function paintLangSeg() {
+      var l = I18N.lang();
+      document.querySelectorAll('#langSeg button').forEach(function (b) { b.classList.toggle('on', b.dataset.lang === l); });
+    }
+    I18N.apply(); // translate the static chrome to whatever language was saved, before first paint
+    paintLangSeg();
+    document.getElementById('langSeg').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-lang]'); if (b) I18N.setLang(b.dataset.lang);
+    });
+    // Anything built once in JS (select options, table headers, the crumb,
+    // whatever's on the current page) doesn't pick up a language change
+    // from applyI18n() alone — that only walks [data-i18n] elements, not
+    // JS-generated strings — so re-render those explicitly on toggle.
+    document.addEventListener('i18nchange', function () {
+      paintLangSeg();
+      document.getElementById('crumbTitle').textContent = I18N.t('nav.' + state.page);
+      rebuildCatFilterOptions();
+      document.getElementById('liveHead').innerHTML = evHeadHTML();
+      document.getElementById('netHead').innerHTML = netHeadHTML();
+      document.querySelectorAll('thead.evhead').forEach(function (h) { h.innerHTML = evHeadHTML(); });
+      if (glossaryRebuildCats) glossaryRebuildCats();
+      if (glossaryRender) glossaryRender();
+      renderOverviewAlerts();
+      refreshCurrent(true);
     });
     document.getElementById('drClose').addEventListener('click', closeDrawer);
     document.getElementById('drawerMask').addEventListener('click', closeDrawer);
@@ -222,15 +329,15 @@
     window.addEventListener('hashchange', route);
   }
 
-  var PAGE_TITLE = { overview: '总览', live: '实时事件', timeline: '操作时间线', net: '网络活动', disk: '磁盘读写', mem: '内存', proc: '进程', alerts: '告警', glossary: '知识库' };
+  var PAGE_IDS = ['overview', 'live', 'timeline', 'net', 'disk', 'mem', 'proc', 'alerts', 'glossary'];
   var refreshFns = {};
   function route() {
     var page = (location.hash || '#overview').slice(1);
-    if (!PAGE_TITLE[page]) page = 'overview';
+    if (PAGE_IDS.indexOf(page) === -1) page = 'overview';
     state.page = page;
     document.querySelectorAll('.page').forEach(function (p) { p.classList.toggle('active', p.id === 'page-' + page); });
     document.querySelectorAll('.nav a').forEach(function (a) { a.classList.toggle('active', a.dataset.page === page); });
-    document.getElementById('crumbTitle').textContent = PAGE_TITLE[page];
+    document.getElementById('crumbTitle').textContent = I18N.t('nav.' + page);
     refreshCurrent(true);
   }
   function refreshCurrent(force) {
@@ -273,21 +380,30 @@
     var tbody = document.getElementById('liveBody');
     if (!tbody) return;
     var filtered = events.filter(liveFilterMatch);
-    if (filtered.length) {
-      var wrap = document.getElementById('liveWrap');
-      var atTop = wrap.scrollTop < 4;
-      tbody.insertAdjacentHTML('afterbegin', filtered.map(evRowHTML).join(''));
-      liveEvents = filtered.concat(liveEvents);
-      while (tbody.rows.length > 2000) tbody.deleteRow(tbody.rows.length - 1);
-      liveEvents = liveEvents.slice(0, 2000);
-      document.getElementById('liveEmpty').style.display = tbody.rows.length ? 'none' : '';
-      document.getElementById('liveCount').textContent = tbody.rows.length + ' 条';
-      if (document.getElementById('chkScroll').checked && atTop) wrap.scrollTop = 0;
+    if (!filtered.length) return;
+    var wrap = document.getElementById('liveWrap');
+    var autoScroll = document.getElementById('chkScroll').checked;
+    var prevHeight = wrap.scrollHeight, prevTop = wrap.scrollTop;
+    tbody.insertAdjacentHTML('afterbegin', filtered.map(evRowHTML).join(''));
+    liveEvents = filtered.concat(liveEvents);
+    while (tbody.rows.length > 2000) tbody.deleteRow(tbody.rows.length - 1);
+    liveEvents = liveEvents.slice(0, 2000);
+    document.getElementById('liveEmpty').style.display = tbody.rows.length ? 'none' : '';
+    document.getElementById('liveCount').textContent = tbody.rows.length + ' 条';
+    if (autoScroll) {
+      wrap.scrollTop = 0;
+    } else {
+      // New rows land above whatever the user is reading; without this the
+      // browser leaves scrollTop's pixel value untouched, which silently
+      // drifts the visible rows upward on every push even though "自动滚动"
+      // is off. Grow scrollTop by exactly the height just inserted so the
+      // same rows stay pinned in view.
+      wrap.scrollTop = prevTop + (wrap.scrollHeight - prevHeight);
     }
   }
   function updatePausedBanner() {
     var b = document.getElementById('pausedBanner');
-    b.textContent = '已暂停 · 有 ' + pendingCount + ' 条新事件未显示，点击恢复';
+    b.textContent = I18N.t('live.pausedBanner').replace('{n}', pendingCount);
     b.classList.toggle('show', livePaused);
   }
 
@@ -371,8 +487,8 @@
     if (!el) return;
     el.innerHTML = lastOverviewAlerts.map(function (ev) {
       EV.set(ev.id, ev);
-      return '<div class="list-item click" data-id="' + ev.id + '"><span class="risk ' + ev.risk + '">' + RISK_LABEL[ev.risk] + '</span>' +
-        '<span class="grow">' + esc(ev.rule_title || ev.plain || ev.title) + '</span><span class="dim">' + fmtAgo(ev.ts) + '</span></div>';
+      return '<div class="list-item click" data-id="' + ev.id + '"><span class="risk ' + ev.risk + '">' + riskLabel(ev.risk) + '</span>' +
+        '<span class="grow">' + esc(evText(ev, 'rule_title') || evText(ev, 'plain') || evText(ev, 'title')) + '</span><span class="dim">' + fmtAgo(ev.ts) + '</span></div>';
     }).join('') || '<div class="empty">暂无告警，一切正常</div>';
   }
   function maybeUpdateOverviewAlerts(events) {
@@ -397,24 +513,31 @@
     }
     if (pid && String(ev.pid) !== pid) return false;
     if (q) {
-      var hay = [ev.comm, ev.exe, ev.plain, ev.pro, ev.title, JSON.stringify(ev.fields || {})].join(' ').toLowerCase();
+      var hay = [ev.comm, ev.exe, ev.plain, ev.plain_en, ev.pro, ev.title, ev.title_en, JSON.stringify(ev.fields || {})].join(' ').toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
   }
+  function rebuildCatFilterOptions() {
+    var catSel = document.getElementById('fCat');
+    if (!catSel) return;
+    var cur = catSel.value;
+    catSel.querySelectorAll('option[value]:not([value=""])').forEach(function (o) { o.remove(); });
+    for (var k in CAT) catSel.insertAdjacentHTML('beforeend', '<option value="' + k + '">' + esc(catLabel(k)) + '</option>');
+    catSel.value = cur;
+  }
   function initLive() {
     document.getElementById('liveHead').innerHTML = evHeadHTML();
-    var catSel = document.getElementById('fCat');
-    for (var k in CAT) catSel.insertAdjacentHTML('beforeend', '<option value="' + k + '">' + CAT[k].zh + '</option>');
+    rebuildCatFilterOptions();
     ['fCat', 'fRisk', 'fPid'].forEach(function (id) { document.getElementById(id).addEventListener('change', reapplyLiveFilter); });
     document.getElementById('fQ').addEventListener('input', debounce(reapplyLiveFilter, 200));
     document.getElementById('btnPause').addEventListener('click', function () {
       livePaused = !livePaused;
-      this.textContent = livePaused ? '▶ 继续' : '⏸ 暂停';
+      this.textContent = livePaused ? I18N.t('live.resume') : I18N.t('live.pause');
       if (!livePaused) { updatePausedBanner(); pendingCount = 0; loadLive(true); }
     });
     document.getElementById('pausedBanner').addEventListener('click', function () {
-      livePaused = false; document.getElementById('btnPause').textContent = '⏸ 暂停'; pendingCount = 0; updatePausedBanner(); loadLive(true);
+      livePaused = false; document.getElementById('btnPause').textContent = I18N.t('live.pause'); pendingCount = 0; updatePausedBanner(); loadLive(true);
     });
     document.getElementById('btnClear').addEventListener('click', function () {
       liveEvents = []; document.getElementById('liveBody').innerHTML = '';
@@ -448,9 +571,17 @@
       riskColor: function (r) { return r === 'high' ? Charts.cssVar('--red') : Charts.cssVar('--yellow'); },
       onClick: function (hit) {
         var lane = hit.lane, params = { since: hit.since, until: hit.until, limit: 300 };
-        if (tlLaneMode === 'cat') params.cat = lane.name; else if (/^\d+$/.test(lane.name)) params.pid = lane.name; else params.q = lane.name;
+        if (tlLaneMode === 'cat') params.cat = lane.name;
+        else if (tlLaneMode === 'agent') params.agent = lane.name;
+        else if (/^\d+$/.test(lane.name)) params.pid = lane.name;
+        else params.q = lane.name;
         document.getElementById('tlSelTitle').textContent = (lane.label || lane.name) + ' · ' + hit.b.n + ' 个事件';
         document.getElementById('tlSelSub').textContent = new Date(hit.since).toLocaleTimeString() + ' – ' + new Date(hit.until).toLocaleTimeString();
+        // #tlBox now caps/scrolls internally so "按进程" with many lanes
+        // can't push this panel far down the page — but on a short
+        // viewport it can still end up out of view, so bring it into
+        // sight explicitly rather than make the user go hunting for it.
+        document.getElementById('tlSelTitle').closest('.panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         api('/api/events', params).then(function (r) { renderEvents(document.getElementById('tlEvents'), r.events || []); }).catch(function () {});
       },
     });
@@ -469,7 +600,10 @@
   }
 
   // ---------------- NET ----------------
-  function netHeadHTML() { return '<tr><th>协议</th><th>本地地址</th><th>远程地址</th><th class="hide-sm">状态</th><th>进程</th><th>服务</th></tr>'; }
+  function netHeadHTML() {
+    return '<tr><th>' + esc(I18N.t('th.proto')) + '</th><th>' + esc(I18N.t('th.localAddr')) + '</th><th>' + esc(I18N.t('th.remoteAddr')) +
+      '</th><th class="hide-sm">' + esc(I18N.t('th.state')) + '</th><th>' + esc(I18N.t('th.process')) + '</th><th>' + esc(I18N.t('th.service')) + '</th></tr>';
+  }
   function initNet() {
     document.getElementById('netHead').innerHTML = netHeadHTML();
     document.querySelector('#page-net thead.evhead').innerHTML = evHeadHTML();
@@ -589,12 +723,10 @@
       var summary = d.maps_summary || {};
       var total = Object.values(summary).reduce(function (a, b) { return a + b; }, 0) || 1;
       document.getElementById('memKindBar').innerHTML = Object.keys(summary).map(function (k) {
-        var mk = MEMKIND[k] || { zh: k, color: 'var(--text-faint)' };
-        return '<div style="width:' + (100 * summary[k] / total) + '%;background:' + mk.color + '"></div>';
+        return '<div style="width:' + (100 * summary[k] / total) + '%;background:' + memkindColor(k) + '"></div>';
       }).join('');
       document.getElementById('memKindLegend').innerHTML = Object.keys(summary).map(function (k) {
-        var mk = MEMKIND[k] || { zh: k, color: 'var(--text-faint)' };
-        return '<span><i style="background:' + mk.color + '"></i>' + mk.zh + ' ' + fmtBytes(summary[k]) + '</span>';
+        return '<span><i style="background:' + memkindColor(k) + '"></i>' + esc(memkindLabel(k)) + ' ' + fmtBytes(summary[k]) + '</span>';
       }).join('');
       var maps = (d.maps || []).slice().sort(function (a, b) { return Number(a.start) - Number(b.start); });
       if (!memStrip) memStrip = new Charts.AddrStrip(document.getElementById('memStrip'));
@@ -609,8 +741,7 @@
         return '<tr><td class="mono nowrap">' + m.start + '-' + m.end + '</td><td class="num">' + fmtBytes(m.size) + '</td><td class="mono">' + esc(m.perms) + '</td><td class="mono">' + esc(m.offset) + '</td><td class="hide-sm mono">' + esc(m.dev) + '</td><td class="hide-sm">' + esc(m.inode) + '</td><td>' + esc(m.kind) + '</td><td class="wrap mono">' + esc(m.path) + '</td></tr>';
       }).join('') || '<tr><td colspan="8" class="empty">该平台暂不支持内存地图</td></tr>';
       document.getElementById('memMapPlain').innerHTML = maps.filter(function (m) { return m.size > 4096; }).slice(0, 150).map(function (m) {
-        var mk = MEMKIND[m.kind] || { zh: m.kind, color: 'var(--text-faint)' };
-        return '<div class="memmap-row"><span class="k"><i style="background:' + mk.color + '"></i>' + mk.zh + '</span><span class="desc">' + esc(m.plain || '') + '</span><span class="sz">' + fmtBytes(m.size) + '</span></div>';
+        return '<div class="memmap-row"><span class="k"><i style="background:' + memkindColor(m.kind) + '"></i>' + esc(memkindLabel(m.kind)) + '</span><span class="desc">' + esc(evText(m, 'plain')) + '</span><span class="sz">' + fmtBytes(m.size) + '</span></div>';
       }).join('') || '<div class="empty">该平台暂不支持内存地图</div>';
     }).catch(function () {});
     api('/api/events', { cat: 'memory', pid: pid, limit: 50 }).then(function (r) { renderEvents(document.getElementById('memEvents'), r.events || []); }).catch(function () {});
@@ -672,7 +803,7 @@
       (d.fds || []).forEach(function (f) { fdKinds[f.kind] = (fdKinds[f.kind] || 0) + 1; });
       el.innerHTML =
         '<h3 class="panel-header"><span>' + esc(p.comm) + ' <span class="dim">#' + pid + '</span></span></h3>' +
-        '<div class="plain-box">' + esc(d.plain || '') + '</div>' +
+        '<div class="plain-box">' + esc(evText(d, 'plain')) + '</div>' +
         '<dl class="kv mt">' +
         '<dt>命令行</dt><dd class="mono wrap">' + esc(p.cmdline || p.exe) + '</dd>' +
         '<dt>用户</dt><dd>' + esc(p.user) + ' (uid ' + p.uid + ')</dd>' +
@@ -704,7 +835,7 @@
     api('/api/rules').then(function (r) {
       document.getElementById('rulesCount').textContent = '(' + (r.rules || []).length + ' 条)';
       document.getElementById('rulesBody').innerHTML = (r.rules || []).map(function (ru) {
-        return '<tr><td><span class="risk ' + ru.risk + '">' + RISK_LABEL[ru.risk] + '</span></td><td>' + esc(ru.title) + '<div class="dim" style="font-size:11.5px">' + esc(ru.desc) + '</div></td>' +
+        return '<tr><td><span class="risk ' + ru.risk + '">' + riskLabel(ru.risk) + '</span></td><td>' + esc(evText(ru, 'title')) + '<div class="dim" style="font-size:11.5px">' + esc(evText(ru, 'desc')) + '</div></td>' +
           '<td class="pro-only mono">' + esc(ru.id) + '</td><td class="pro-only mono">' + esc((ru.types || []).join(',')) + '</td><td class="pro-only mono">' + esc(ru.field) + ' ~ /' + esc(ru.pattern) + '/</td></tr>';
       }).join('');
     }).catch(function () {});
@@ -721,20 +852,35 @@
   function initGlossary() {
     api('/api/glossary').then(function (r) {
       var terms = r.terms || [];
-      var cats = Array.from(new Set(terms.map(function (t) { return t.cat; }).filter(Boolean)));
+      // The <option> value is always the stable Chinese cat key (so
+      // filtering doesn't break when the language toggles); only the
+      // displayed label follows evText(). Rebuilt on language change via
+      // glossaryRebuildCats, defined just below.
+      var byCatZh = {};
+      terms.forEach(function (t) { if (t.cat) byCatZh[t.cat] = t; });
+      glossaryRebuildCats = function () {
+        var sel = document.getElementById('glCat'), cur = sel.value;
+        sel.querySelectorAll('option[value]:not([value=""])').forEach(function (o) { o.remove(); });
+        Object.keys(byCatZh).forEach(function (zh) {
+          sel.insertAdjacentHTML('beforeend', '<option value="' + esc(zh) + '">' + esc(evText(byCatZh[zh], 'cat')) + '</option>');
+        });
+        sel.value = cur;
+      };
+      glossaryRebuildCats();
       var sel = document.getElementById('glCat');
-      cats.forEach(function (c) { sel.insertAdjacentHTML('beforeend', '<option>' + esc(c) + '</option>'); });
       function render() {
         var q = document.getElementById('glQ').value.trim().toLowerCase(), c = sel.value;
         var list = terms.filter(function (t) {
           if (c && t.cat !== c) return false;
-          if (q && (t.term + t.short).toLowerCase().indexOf(q) === -1) return false;
+          if (q && (t.term + t.short + (t.term_en || '') + (t.short_en || '')).toLowerCase().indexOf(q) === -1) return false;
           return true;
         });
+        glossaryRender = render;
         document.getElementById('glGrid').innerHTML = list.map(function (t) {
-          return '<div class="gloss"><h3>' + esc(t.term) + (t.cat ? '<span class="tag">' + esc(t.cat) + '</span>' : '') + '</h3>' +
-            '<div class="short">' + esc(t.short) + '</div><div class="plain-box">' + esc(t.plain) + '</div>' +
-            (t.pro ? '<div class="pro-text mt">' + esc(t.pro) + '</div>' : '') + '</div>';
+          var catLbl = t.cat ? evText(t, 'cat') : '';
+          return '<div class="gloss"><h3>' + esc(evText(t, 'term')) + (catLbl ? '<span class="tag">' + esc(catLbl) + '</span>' : '') + '</h3>' +
+            '<div class="short">' + esc(evText(t, 'short')) + '</div><div class="plain-box">' + esc(evText(t, 'plain')) + '</div>' +
+            (t.pro ? '<div class="pro-text mt">' + esc(evText(t, 'pro')) + '</div>' : '') + '</div>';
         }).join('') || '<div class="empty">没有找到相关术语</div>';
       }
       document.getElementById('glQ').addEventListener('input', debounce(render, 150));

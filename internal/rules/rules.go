@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"sync"
 
-	"unix-monitor/internal/event"
+	"argusbpf/internal/event"
 )
 
 // Rule is one risk rule. Types lists the event "cat:type" or "cat" patterns
@@ -18,13 +18,15 @@ import (
 // which event field (or "comm"/"exe"/"path"/"target") Pattern is matched
 // against with a case-insensitive regexp.
 type Rule struct {
-	ID      string      `json:"id"`
-	Risk    event.Risk  `json:"risk"`
-	Types   []string    `json:"types"`
-	Field   string      `json:"field"`
-	Pattern string      `json:"pattern"`
-	Title   string      `json:"title"`
-	Desc    string      `json:"desc"`
+	ID      string     `json:"id"`
+	Risk    event.Risk `json:"risk"`
+	Types   []string   `json:"types"`
+	Field   string     `json:"field"`
+	Pattern string     `json:"pattern"`
+	Title   string     `json:"title"`
+	Desc    string     `json:"desc"`
+	TitleEn string     `json:"title_en"`
+	DescEn  string     `json:"desc_en"`
 	compile *regexp.Regexp
 }
 
@@ -127,6 +129,7 @@ func (e *Engine) Evaluate(ev *event.Event) {
 		ev.Risk = r.Risk
 		ev.Rule = r.ID
 		ev.RuleTitle = r.Title
+		ev.RuleTitleEn = r.TitleEn
 		return
 	}
 }

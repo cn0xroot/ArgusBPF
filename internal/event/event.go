@@ -57,14 +57,29 @@ type Event struct {
 	Comm string `json:"comm"`
 	Exe  string `json:"exe"`
 
-	Risk      Risk   `json:"risk"`
-	Rule      string `json:"rule,omitempty"`
-	RuleTitle string `json:"rule_title,omitempty"`
+	// Agent/AgentDisplay are set when Comm/Exe match a recognized AI
+	// coding-agent CLI (see internal/agents) — e.g. "claude-code"/"Claude
+	// Code" — so the UI can show "what did the AI agent do" on its own.
+	Agent        string `json:"agent,omitempty"`
+	AgentDisplay string `json:"agent_display,omitempty"`
 
-	Title   string `json:"title"`   // short professional label
-	Pro     string `json:"pro"`     // professional one-line (syscall form)
-	Plain   string `json:"plain"`   // plain-language explanation
-	Analogy string `json:"analogy"` // everyday analogy
+	Risk        Risk   `json:"risk"`
+	Rule        string `json:"rule,omitempty"`
+	RuleTitle   string `json:"rule_title,omitempty"`
+	RuleTitleEn string `json:"rule_title_en,omitempty"`
+
+	// Title/Plain/Analogy are Chinese; the _en fields are their English
+	// counterparts, set by internal/explain for the UI's language toggle
+	// to pick between at render time. Pro (the syscall-form rendering,
+	// e.g. `execve("/bin/sh", [])`) needs no translation — it's already
+	// language-neutral — so it has no _en twin.
+	Title     string `json:"title"`   // short professional label
+	Pro       string `json:"pro"`     // professional one-line (syscall form)
+	Plain     string `json:"plain"`   // plain-language explanation
+	Analogy   string `json:"analogy"` // everyday analogy
+	TitleEn   string `json:"title_en,omitempty"`
+	PlainEn   string `json:"plain_en,omitempty"`
+	AnalogyEn string `json:"analogy_en,omitempty"`
 
 	Fields map[string]any `json:"fields,omitempty"`
 	Count  int            `json:"count"` // number of aggregated raw events

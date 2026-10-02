@@ -14,10 +14,10 @@ import (
 
 	"github.com/shirou/gopsutil/v4/host"
 
-	"unix-monitor/internal/collector"
-	"unix-monitor/internal/rules"
-	"unix-monitor/internal/store"
-	"unix-monitor/internal/sysinfo"
+	"argusbpf/internal/collector"
+	"argusbpf/internal/rules"
+	"argusbpf/internal/store"
+	"argusbpf/internal/sysinfo"
 )
 
 type Server struct {
@@ -104,8 +104,19 @@ func (s *Server) Routes(webFS fs.FS) http.Handler {
 	mux.HandleFunc("GET /api/rules", s.handleRules)
 	mux.HandleFunc("GET /api/glossary", s.handleGlossary)
 	mux.HandleFunc("/ws", s.hub.ServeWS)
-	mux.Handle("/", http.FileServerFS(webFS))
+	mux.Handle("/", noStore(http.FileServerFS(webFS)))
 	return s.withToken(mux)
+}
+
+// noStore disables browser caching for the embedded web UI. It's rebuilt
+// into the binary on every change (go:embed), so a stale cached copy is
+// pure confusion with no upside — unlike the API routes, these are tiny,
+// local-only static files, so there's no real cost to always refetching.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) withToken(next http.Handler) http.Handler {

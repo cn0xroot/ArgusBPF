@@ -1,4 +1,4 @@
-module unix-monitor
+module argusbpf
 
 go 1.26.4
 

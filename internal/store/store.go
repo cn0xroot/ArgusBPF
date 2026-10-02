@@ -14,7 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"unix-monitor/internal/event"
+	"argusbpf/internal/event"
 )
 
 type Store struct {
@@ -22,14 +22,14 @@ type Store struct {
 }
 
 // Open creates/opens the SQLite database at path (default
-// ~/.unix-monitor/events.db) and ensures the schema exists.
+// ~/.argusbpf/events.db) and ensures the schema exists.
 func Open(path string) (*Store, error) {
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			home = "."
 		}
-		dir := filepath.Join(home, ".unix-monitor")
+		dir := filepath.Join(home, ".argusbpf")
 		_ = os.MkdirAll(dir, 0o755)
 		path = filepath.Join(dir, "events.db")
 	}
@@ -57,17 +57,42 @@ CREATE TABLE IF NOT EXISTS events (
 	pid INTEGER, ppid INTEGER, tid INTEGER, uid INTEGER,
 	user TEXT, comm TEXT, exe TEXT,
 	risk TEXT NOT NULL DEFAULT 'info',
-	rule TEXT, rule_title TEXT,
+	rule TEXT, rule_title TEXT, rule_title_en TEXT,
 	title TEXT, pro TEXT, plain TEXT, analogy TEXT,
+	title_en TEXT, plain_en TEXT, analogy_en TEXT,
 	fields TEXT,
-	count INTEGER NOT NULL DEFAULT 1
+	count INTEGER NOT NULL DEFAULT 1,
+	agent TEXT, agent_display TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_cat ON events(cat, id DESC);
 CREATE INDEX IF NOT EXISTS idx_events_risk ON events(risk, id DESC);
 CREATE INDEX IF NOT EXISTS idx_events_pid ON events(pid, id DESC);
+CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent, id DESC);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	// Defensive ALTER for DBs created before the agent columns existed;
+	// SQLite has no "ADD COLUMN IF NOT EXISTS", so just ignore the
+	// "duplicate column" error on a DB that already has them.
+	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN agent TEXT`)
+	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN agent_display TEXT`)
+	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN rule_title_en TEXT`)
+	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN title_en TEXT`)
+	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN plain_en TEXT`)
+	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN analogy_en TEXT`)
+	return nil
+}
+
+// nullableStr turns "" into a SQL NULL so columns like `agent` can be
+// filtered with a plain `WHERE agent = ?` / grouped without empty-string
+// noise, instead of every unrecognized process writing an empty row.
+func nullableStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // Insert stores ev and sets ev.ID/ev.TS (TS is set by the caller already;
@@ -82,10 +107,12 @@ func (s *Store) Insert(ev *event.Event) error {
 	if ev.Count == 0 {
 		ev.Count = 1
 	}
-	res, err := s.db.Exec(`INSERT INTO events (ts,cat,type,pid,ppid,tid,uid,user,comm,exe,risk,rule,rule_title,title,pro,plain,analogy,fields,count)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := s.db.Exec(`INSERT INTO events (ts,cat,type,pid,ppid,tid,uid,user,comm,exe,risk,rule,rule_title,rule_title_en,title,pro,plain,analogy,title_en,plain_en,analogy_en,fields,count,agent,agent_display)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		ev.TS, ev.Cat, ev.Type, ev.PID, ev.PPID, ev.TID, ev.UID, ev.User, ev.Comm, ev.Exe,
-		string(ev.Risk), ev.Rule, ev.RuleTitle, ev.Title, ev.Pro, ev.Plain, ev.Analogy, fieldsJSON, ev.Count)
+		string(ev.Risk), ev.Rule, ev.RuleTitle, nullableStr(ev.RuleTitleEn), ev.Title, ev.Pro, ev.Plain, ev.Analogy,
+		nullableStr(ev.TitleEn), nullableStr(ev.PlainEn), nullableStr(ev.AnalogyEn), fieldsJSON, ev.Count,
+		nullableStr(ev.Agent), nullableStr(ev.AgentDisplay))
 	if err != nil {
 		return err
 	}
@@ -99,11 +126,11 @@ func (s *Store) Insert(ev *event.Event) error {
 
 // Filter selects events for Query. Risk is "", "low+", "medium+", "high".
 type Filter struct {
-	Cat, Type, Risk, Q string
-	PID                int32
-	Since, Until       int64 // unix ms, 0 = unbounded
-	Before             int64 // id cursor for pagination, 0 = none
-	Limit              int
+	Cat, Type, Risk, Q, Agent string
+	PID                       int32
+	Since, Until              int64 // unix ms, 0 = unbounded
+	Before                    int64 // id cursor for pagination, 0 = none
+	Limit                     int
 }
 
 func riskSet(min string) []string {
@@ -142,6 +169,10 @@ func (s *Store) Query(f Filter) ([]*event.Event, error) {
 		where = append(where, "pid = ?")
 		args = append(args, f.PID)
 	}
+	if f.Agent != "" {
+		where = append(where, "agent = ?")
+		args = append(args, f.Agent)
+	}
 	if f.Since > 0 {
 		where = append(where, "ts >= ?")
 		args = append(args, f.Since)
@@ -163,7 +194,7 @@ func (s *Store) Query(f Filter) ([]*event.Event, error) {
 	if limit <= 0 || limit > 2000 {
 		limit = 200
 	}
-	query := "SELECT id,ts,cat,type,pid,ppid,tid,uid,user,comm,exe,risk,rule,rule_title,title,pro,plain,analogy,fields,count FROM events"
+	query := "SELECT id,ts,cat,type,pid,ppid,tid,uid,user,comm,exe,risk,rule,rule_title,rule_title_en,title,pro,plain,analogy,title_en,plain_en,analogy_en,fields,count,agent,agent_display FROM events"
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -193,11 +224,16 @@ type rowScanner interface {
 func scanEvent(rows rowScanner) (*event.Event, error) {
 	var ev event.Event
 	var risk, fieldsJSON string
+	var agent, agentDisplay, ruleTitleEn, titleEn, plainEn, analogyEn sql.NullString
 	if err := rows.Scan(&ev.ID, &ev.TS, &ev.Cat, &ev.Type, &ev.PID, &ev.PPID, &ev.TID, &ev.UID, &ev.User, &ev.Comm, &ev.Exe,
-		&risk, &ev.Rule, &ev.RuleTitle, &ev.Title, &ev.Pro, &ev.Plain, &ev.Analogy, &fieldsJSON, &ev.Count); err != nil {
+		&risk, &ev.Rule, &ev.RuleTitle, &ruleTitleEn, &ev.Title, &ev.Pro, &ev.Plain, &ev.Analogy,
+		&titleEn, &plainEn, &analogyEn, &fieldsJSON, &ev.Count,
+		&agent, &agentDisplay); err != nil {
 		return nil, err
 	}
 	ev.Risk = event.Risk(risk)
+	ev.Agent, ev.AgentDisplay = agent.String, agentDisplay.String
+	ev.RuleTitleEn, ev.TitleEn, ev.PlainEn, ev.AnalogyEn = ruleTitleEn.String, titleEn.String, plainEn.String, analogyEn.String
 	if fieldsJSON != "" && fieldsJSON != "{}" {
 		_ = json.Unmarshal([]byte(fieldsJSON), &ev.Fields)
 	}
@@ -314,12 +350,18 @@ func (s *Store) Timeline(rangeSec int64, lane string) (Timeline, error) {
 	}
 
 	laneCol := "cat"
-	if lane == "proc" {
+	extraWhere := ""
+	switch lane {
+	case "proc":
 		laneCol = "comm"
+	case "agent":
+		// Only AI coding-agent CLIs get their own lane here; everything
+		// else would otherwise show up as one huge NULL lane.
+		laneCol, extraWhere = "agent", " AND agent IS NOT NULL"
 	}
 	// modernc sqlite has no custom scalar functions registered, so the
 	// per-bucket max-risk aggregation happens in Go below instead of SQL.
-	rows2, err := s.db.Query(fmt.Sprintf(`SELECT %s, (ts-?)/?, risk, COUNT(*) FROM events WHERE ts >= ? GROUP BY %s, (ts-?)/?, risk`, laneCol, laneCol),
+	rows2, err := s.db.Query(fmt.Sprintf(`SELECT %s, (ts-?)/?, risk, COUNT(*) FROM events WHERE ts >= ?%s GROUP BY %s, (ts-?)/?, risk`, laneCol, extraWhere, laneCol),
 		start, bucket, start, start, bucket)
 	if err != nil {
 		return Timeline{}, err

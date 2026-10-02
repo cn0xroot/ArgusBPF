@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Unix-Monitor installer.
+# ArgusBPF installer.
 # Builds the binary (no clang/bpftool needed — the eBPF object is
 # pre-built and committed) and installs it, with an optional systemd
 # service for always-on root/eBPF collection.
 #
 # Usage: ./install.sh [--prefix /usr/local/bin] [--systemd] [--no-build]
 #   --systemd   also install + enable a systemd unit (requires root)
-#   --no-build  skip `go build`, just (re)install an existing ./unix-monitor
+#   --no-build  skip `go build`, just (re)install an existing ./argusbpf
 set -euo pipefail
 
 PREFIX="/usr/local/bin"
@@ -41,14 +41,14 @@ if [ "$DO_BUILD" -eq 1 ]; then
 		sayzh "错误：未找到 Go 工具链，请先安装 Go 1.22 及以上版本。"
 		exit 1
 	fi
-	say "Building unix-monitor..."
-	sayzh "正在编译 unix-monitor…"
-	go build -o unix-monitor .
+	say "Building argusbpf..."
+	sayzh "正在编译 argusbpf…"
+	go build -o argusbpf .
 fi
 
-if [ ! -x ./unix-monitor ]; then
-	say "error: ./unix-monitor not found — run without --no-build, or build it manually first."
-	sayzh "错误：未找到 ./unix-monitor，请去掉 --no-build 重新运行，或先手动编译。"
+if [ ! -x ./argusbpf ]; then
+	say "error: ./argusbpf not found — run without --no-build, or build it manually first."
+	sayzh "错误：未找到 ./argusbpf，请去掉 --no-build 重新运行，或先手动编译。"
 	exit 1
 fi
 
@@ -60,10 +60,10 @@ else
 	INSTALL_CMD="sudo install"
 fi
 
-say "Installing to $PREFIX/unix-monitor ..."
-sayzh "正在安装到 $PREFIX/unix-monitor …"
+say "Installing to $PREFIX/argusbpf ..."
+sayzh "正在安装到 $PREFIX/argusbpf …"
 mkdir -p "$PREFIX" 2>/dev/null || true
-$INSTALL_CMD -m 0755 ./unix-monitor "$PREFIX/unix-monitor"
+$INSTALL_CMD -m 0755 ./argusbpf "$PREFIX/argusbpf"
 
 if [ "$WITH_SYSTEMD" -eq 1 ]; then
 	if [ "$(id -u)" -ne 0 ]; then
@@ -71,16 +71,16 @@ if [ "$WITH_SYSTEMD" -eq 1 ]; then
 		sayzh "错误：--systemd 需要以 root（sudo）运行本脚本。"
 		exit 1
 	fi
-	UNIT=/etc/systemd/system/unix-monitor.service
+	UNIT=/etc/systemd/system/argusbpf.service
 	say "Installing systemd unit at $UNIT ..."
 	sayzh "正在安装 systemd 服务到 $UNIT …"
 	cat >"$UNIT" <<EOF
 [Unit]
-Description=Unix-Monitor — system activity dashboard (eBPF)
+Description=ArgusBPF — system & AI-agent activity dashboard (eBPF)
 After=network.target
 
 [Service]
-ExecStart=$PREFIX/unix-monitor --listen 127.0.0.1:9900
+ExecStart=$PREFIX/argusbpf --listen 127.0.0.1:1024
 Restart=on-failure
 RestartSec=2
 # eBPF needs root (or CAP_BPF+CAP_PERFMON+CAP_SYS_ADMIN depending on kernel).
@@ -90,20 +90,20 @@ User=root
 WantedBy=multi-user.target
 EOF
 	systemctl daemon-reload
-	systemctl enable --now unix-monitor.service
-	say "Started. Check status with: systemctl status unix-monitor"
-	sayzh "已启动。可用以下命令查看状态：systemctl status unix-monitor"
+	systemctl enable --now argusbpf.service
+	say "Started. Check status with: systemctl status argusbpf"
+	sayzh "已启动。可用以下命令查看状态：systemctl status argusbpf"
 else
 	say ""
 	say "Install complete. Run it with:"
 	sayzh "安装完成。运行方式："
-	say "  sudo $PREFIX/unix-monitor          # root enables the eBPF collector"
-	sayzh "  sudo $PREFIX/unix-monitor          # root 权限才能启用 eBPF 采集"
-	say "  $PREFIX/unix-monitor                # without root, falls back to polling"
-	sayzh "  $PREFIX/unix-monitor                # 非 root 会自动降级为轮询模式"
+	say "  sudo $PREFIX/argusbpf          # root enables the eBPF collector"
+	sayzh "  sudo $PREFIX/argusbpf          # root 权限才能启用 eBPF 采集"
+	say "  $PREFIX/argusbpf                # without root, falls back to polling"
+	sayzh "  $PREFIX/argusbpf                # 非 root 会自动降级为轮询模式"
 	say ""
-	say "Then open: http://127.0.0.1:9900"
-	sayzh "然后打开：http://127.0.0.1:9900"
+	say "Then open: http://127.0.0.1:1024"
+	sayzh "然后打开：http://127.0.0.1:1024"
 	say ""
 	say "Re-run with --systemd to install it as an always-on root service."
 	sayzh "加上 --systemd 参数可安装为常驻的 root 系统服务。"

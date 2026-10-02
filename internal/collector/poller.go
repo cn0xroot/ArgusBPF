@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"unix-monitor/internal/event"
-	"unix-monitor/internal/sysinfo"
+	"argusbpf/internal/event"
+	"argusbpf/internal/sysinfo"
 )
 
 // Poller is the cross-platform fallback collector: it diffs periodic

@@ -74,16 +74,18 @@ type MemMap struct {
 	Dev    string `json:"dev"`
 	Inode  string `json:"inode"`
 	Path   string `json:"path"`
-	Kind   string `json:"kind"` // code|data|heap|stack|lib|anon|vdso|file|shm
-	Plain  string `json:"plain"`
+	Kind    string `json:"kind"` // code|data|heap|stack|lib|anon|vdso|file|shm
+	Plain   string `json:"plain"`
+	PlainEn string `json:"plain_en"`
 }
 
 // FD is one open file descriptor.
 type FD struct {
-	FD     int    `json:"fd"`
-	Target string `json:"target"`
-	Kind   string `json:"kind"` // file|socket|pipe|anon|dev|other
-	Plain  string `json:"plain"`
+	FD      int    `json:"fd"`
+	Target  string `json:"target"`
+	Kind    string `json:"kind"` // file|socket|pipe|anon|dev|other
+	Plain   string `json:"plain"`
+	PlainEn string `json:"plain_en"`
 }
 
 // Conn is one network socket.
@@ -97,6 +99,7 @@ type Conn struct {
 	Host    string `json:"host"`
 	Service string `json:"service"`
 	Plain   string `json:"plain"`
+	PlainEn string `json:"plain_en"`
 }
 
 // ProcDetail is the full per-process view.
@@ -108,6 +111,7 @@ type ProcDetail struct {
 	IO          IOStat            `json:"io"`
 	Conns       []Conn            `json:"conns"`
 	Plain       string            `json:"plain"`
+	PlainEn     string            `json:"plain_en"`
 }
 
 type IOStat struct {

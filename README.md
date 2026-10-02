@@ -1,21 +1,51 @@
-# Unix-Monitor
+# ArgusBPF
 
 *[中文说明](README.zh-CN.md)*
 
-**See everything your operating system is doing — processes, files, network, memory, disk, kernel activity — through a live dashboard that explains itself in plain language, not just syscall jargon.**
+**The thousand-eyed watchman for your machine: see what your OS — and every AI coding agent running on it — is actually doing, via eBPF, explained in plain language instead of syscall jargon.**
 
-Unix-Monitor is a single Go binary. On Linux/amd64 running as root it hooks the kernel directly via **eBPF** (CO-RE, no kernel headers needed at runtime); everywhere else (other OSes, other architectures, no root) it falls back automatically to a cross-platform polling collector built on [gopsutil](https://github.com/shirou/gopsutil). Either way you get a web UI with a **Professional mode** (syscall forms, memory addresses, sector numbers, raw fields) and a **Plain-language mode** (short, everyday explanations and analogies for exactly the same events) that you can toggle at any time.
+*Argus Panoptes, "the all-seeing," never slept: a hundred eyes, watching everything at once. ArgusBPF borrows the name for the same reason — it watches the kernel directly (**BPF**) and knows what to look for when the thing doing the looking is an **AI agent CLI**, not just another process.*
 
-It's the same idea as tools like [CC-Monitor](https://github.com/) that watch what an AI coding agent does to your machine — applied to the operating system itself.
+ArgusBPF is a single Go binary. On Linux/amd64 running as root it hooks the kernel directly via **eBPF** (CO-RE, no kernel headers needed at runtime); everywhere else (other OSes, other architectures, no root) it falls back automatically to a cross-platform polling collector built on [gopsutil](https://github.com/shirou/gopsutil). Either way you get a web UI with a **Professional mode** (syscall forms, memory addresses, sector numbers, raw fields) and a **Plain-language mode** (short, everyday explanations and analogies for exactly the same events) that you can toggle at any time.
+
+It's the same idea as tools like [CC-Monitor](https://github.com/) that watch what an AI coding agent does to your machine — applied to the operating system itself, and extended to recognize *which* AI agent CLI is doing it.
+
+## Highlights
+
+- 🔬 **eBPF-native, not strace-wrapped.** A single CO-RE program (`bpf/monitor.c`) hangs off `raw_syscalls/sys_enter` plus the `module_load`/`block_rq_issue` tracepoints — one kernel-side dispatcher, not one traced process at a time, no ptrace overhead, and it keeps working across kernel versions without rebuilding (no kernel headers needed at runtime).
+- 🤖 **Knows an AI agent when it sees one.** 10 mainstream AI coding-agent CLIs are recognized by process identity (not guesswork) and get their own dimension everywhere: a feed badge, a filterable `agent` field, and a dedicated timeline lane — see what Claude Code/Codex/etc. actually touched on the box, apart from everything else.
+- 🔓 **Sees through TLS, not just around it.** eCapture-style uprobes on `SSL_read`/`SSL_write`/`getaddrinfo`/`exec_simple_query` recover plaintext DNS/TLS/SQL *in the target process's own memory*, before/after encryption — no MITM proxy, no cert games.
+- 🗣️ **Every event, two languages.** Not a "simple mode" that hides columns — the same event gets a real syscall-form professional rendering *and* a separately generated plain-language explanation with an everyday analogy, toggleable instantly, powered by an offline template/lookup engine (zero LLM calls, fully deterministic, works with no network at all).
+- 📦 **One binary, every OS.** Pure Go, no CGO anywhere (SQLite included). Root + Linux/amd64 gets the full eBPF pipeline; anywhere else — other OS, other arch, no root — it transparently drops to a gopsutil-based poller instead of refusing to run.
 
 ## Features
 
+- **AI agent recognition** — every event's process is checked against a table of mainstream AI coding-agent CLIs (Claude Code, Codex, Cursor, Gemini CLI, Grok CLI, Aider, OpenCode, ZCode, OpenClacky, Antigravity CLI — the same roster CC-Monitor tracks on its dev branch); matched events carry an `agent`/`agent_display` field, get a 🤖 badge in the live feed, and the timeline page has a dedicated "by AI agent" lane so you can see exactly what an agent touched, separate from everything else running on the box.
 - **Live event feed** — every exec, file open/write/unlink/rename, network connect/listen, mmap/mprotect/ptrace/cross-process memory access, kernel module load, and block-device IO, streamed over WebSocket.
 - **Risk rules** — a small JSON ruleset (editable, user-overridable) flags things like reading `/etc/shadow`, W+X memory pages, `ptrace` attach, cross-process memory writes, kernel module loads, SSH activity, and more, at info/low/medium/high severity.
 - **Plain-language explanations** — every event gets both a technical one-liner (`mprotect(addr=0x7f.., prot=RWX)`) and a plain-English explanation with an everyday analogy, generated offline by a template/lookup engine (no LLM calls, fully deterministic).
 - **eCapture-style application probes** — best-effort uprobes on `getaddrinfo` (DNS), OpenSSL `SSL_read`/`SSL_write` (TLS plaintext), and Postgres `exec_simple_query` (SQL text), attached automatically when the target library/binary is present; each one degrades gracefully (and says so in `/api/info`) if it isn't.
-- **Full web dashboard** — overview with live CPU/memory/disk/network charts, live event table, swimlane timeline, network connections, disk IO (including a sector-level scatter plot), per-process memory maps (`/proc/<pid>/maps` visualised and explained region-by-region), a process tree, an alerts view, and a glossary of terms — styled like Grafana (dark panel grid, legends, time-range picker) but self-contained, no Grafana install required.
+- **Full web dashboard** — overview with live CPU/memory/disk/network charts, live event table, swimlane timeline (by category, by process, or by AI agent), network connections, disk IO (including a sector-level scatter plot), per-process memory maps (`/proc/<pid>/maps` visualised and explained region-by-region), a process tree, an alerts view, and a glossary of terms — styled like Grafana (dark panel grid, legends, time-range picker) but self-contained, no Grafana install required.
 - **Cross-platform by design** — pure Go, no CGO (SQLite via `modernc.org/sqlite`). Builds for darwin/windows/linux on amd64/arm64; only the eBPF collector is linux/amd64-specific, everything else runs everywhere.
+
+## Supported AI agent CLIs
+
+Recognition is by process `comm`/`exe` identity (see `internal/agents`), mirroring the roster CC-Monitor tracks on its dev branch. Filter any of these in the API/UI via `?agent=<id>`, or watch the timeline's "by AI agent" lane.
+
+| Agent | id | Detected via (comm / exe) |
+|---|---|---|
+| Claude Code | `claude-code` | `claude` |
+| Codex CLI | `codex` | `codex`, `codex-x86_64-*`, `codex-aarch64-*` |
+| Cursor | `cursor` | `cursor-agent` |
+| Gemini CLI | `gemini-cli` | `gemini` |
+| Grok CLI | `grok-cli` | `grok` |
+| Aider | `aider` | `aider` |
+| OpenCode | `opencode` | `opencode` |
+| ZCode | `zcode` | `zcode`, `zcode-cli` |
+| OpenClacky | `openclacky` | `openclacky`, `clacky` |
+| Antigravity CLI | `antigravity-cli` | `agy`, `antigravity-cli` |
+
+New agents are a one-line addition to `internal/agents/agents.go` — PRs welcome for anything missing.
 
 ## Quick start
 
@@ -24,20 +54,20 @@ It's the same idea as tools like [CC-Monitor](https://github.com/) that watch wh
 make build
 
 # Run as root for the eBPF collector; without root it auto-falls-back to polling
-sudo ./unix-monitor
+sudo ./argusbpf
 
 # Open the dashboard
-open http://127.0.0.1:9900
+open http://127.0.0.1:1024
 ```
 
 Useful flags:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--listen` | `127.0.0.1:9900` | HTTP listen address |
+| `--listen` | `127.0.0.1:1024` | HTTP listen address |
 | `--token` | *(none)* | Require `X-Token` header / `?token=` query param |
-| `--db` | `~/.unix-monitor/events.db` | SQLite database path |
-| `--rules` | `~/.unix-monitor/rules.json` | Override the built-in risk ruleset |
+| `--db` | `~/.argusbpf/events.db` | SQLite database path |
+| `--rules` | `~/.argusbpf/rules.json` | Override the built-in risk ruleset |
 
 ## Building the eBPF program from source
 

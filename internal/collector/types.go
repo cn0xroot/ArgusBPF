@@ -10,7 +10,7 @@ package collector
 import (
 	"context"
 
-	"unix-monitor/internal/event"
+	"argusbpf/internal/event"
 )
 
 // Info describes which backend is active and what it could/couldn't hook.
