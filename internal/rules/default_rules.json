@@ -1,0 +1,23 @@
+[
+  {"id":"mem.ptrace_attach","risk":"high","types":["memory:ptrace"],"field":"type","pattern":"ptrace","title":"进程被附加调试(ptrace)","desc":"有程序用 ptrace 附加到另一个进程，可读写其内存、劫持执行，常见于调试器，也是注入/提权的常用手法。"},
+  {"id":"mem.vm_write","risk":"high","types":["memory:vm_write"],"field":"type","pattern":"vm_write","title":"跨进程写内存(process_vm_writev)","desc":"一个进程直接写入另一个进程的内存空间，正常程序极少这样做，常见于代码注入。"},
+  {"id":"mem.wx_page","risk":"high","types":["memory:mprotect","memory:mmap"],"field":"perm_wx","pattern":"^1$","title":"出现同时可写又可执行的内存页","desc":"内存页被设置为“既能写入又能执行”，是代码注入/shellcode 的典型特征，正常程序很少需要这样的权限组合。"},
+  {"id":"file.shadow","risk":"high","types":["file:open","file:read","file:write"],"field":"path","pattern":"^/etc/shadow$","title":"访问系统密码库(/etc/shadow)","desc":"/etc/shadow 保存所有账户的加密密码，正常程序不会读写它，常见于提权或信息窃取。"},
+  {"id":"file.proc_mem","risk":"high","types":["file:open","file:read","file:write"],"field":"path","pattern":"^/proc/\\d+/mem$","title":"直接读写另一个进程的内存文件","desc":"/proc/<pid>/mem 是进程内存的直接映射，读写它等同于直接操作该进程的内存。"},
+  {"id":"file.ssh_key","risk":"high","types":["file:open","file:read"],"field":"path","pattern":"\\.ssh/(id_rsa|id_ed25519|id_ecdsa)(\\.pub)?$|\\.ssh/authorized_keys$","title":"访问 SSH 私钥/授权文件","desc":"SSH 密钥用于免密登录其它机器，被读取可能意味着密钥被窃取或正在被用于横向移动。"},
+  {"id":"file.tmp_exec","risk":"high","types":["process:exec"],"field":"path","pattern":"^/(tmp|dev/shm|var/tmp)/","title":"执行了临时目录下的程序","desc":"/tmp、/dev/shm 等临时目录下的可执行文件被直接运行，是恶意软件落地执行的常见位置。"},
+  {"id":"kernel.module_load","risk":"high","types":["kernel:module_load"],"field":"type","pattern":"module_load","title":"加载了内核模块","desc":"内核模块拥有和操作系统内核同等的权限，加载未知模块风险极高，rootkit 常借此隐藏自身。"},
+  {"id":"process.setuid_root","risk":"high","types":["process:setuid"],"field":"fields.to_uid","pattern":"^0$","title":"进程提权为 root","desc":"一个进程把自己的用户身份切换成了 root(超级管理员)，获得了对系统的完全控制权。"},
+  {"id":"net.listen_backdoor_port","risk":"medium","types":["net:listen"],"field":"fields.port","pattern":"^(4444|1337|31337|6666|12345)$","title":"在常见后门端口监听","desc":"这些端口号常被恶意程序/反弹shell使用，虽然也可能是正常测试，仍建议确认一下。"},
+  {"id":"security.bash_history_clear","risk":"high","types":["process:exec"],"field":"fields.cmdline","pattern":"history\\s+-c|rm\\s+.*\\.bash_history|unset\\s+HISTFILE","title":"尝试清除命令历史","desc":"清空或禁用命令历史记录是攻击者常用的痕迹清理手段。"},
+  {"id":"file.etc_write","risk":"medium","types":["file:write"],"field":"path","pattern":"^/etc/","title":"修改系统配置文件(/etc)","desc":"/etc 目录存放系统级配置，修改它可能影响系统行为、新增用户或改变启动项。"},
+  {"id":"file.cron_write","risk":"medium","types":["file:write"],"field":"path","pattern":"crontab|/etc/cron|/var/spool/cron","title":"修改定时任务(crontab)","desc":"定时任务可以让程序在未来某个时间自动运行，常被用来做持久化驻留。"},
+  {"id":"file.rc_write","risk":"medium","types":["file:write"],"field":"path","pattern":"\\.bashrc$|\\.bash_profile$|\\.profile$|\\.zshrc$","title":"修改 Shell 启动脚本","desc":"这些文件会在你每次打开终端时自动执行，被修改可能意味着被植入了自动触发的命令。"},
+  {"id":"file.systemd_write","risk":"medium","types":["file:write"],"field":"path","pattern":"/etc/systemd/|/lib/systemd/|\\.service$","title":"修改系统服务配置(systemd)","desc":"systemd 服务配置决定了开机自动启动哪些程序，是常见的持久化驻留位置。"},
+  {"id":"net.connect_raw_ip","risk":"low","types":["net:connect"],"field":"type","pattern":"connect","title":"发起网络连接","desc":"程序主动连接了外部网络地址，多数应用的联网行为都是正常的，建议关注目标地址是否可信。"},
+  {"id":"net.listen","risk":"low","types":["net:listen"],"field":"type","pattern":"listen","title":"开始监听网络端口","desc":"程序打开了一个端口等待外部连接进来，常见于服务器、开发调试工具。"},
+  {"id":"security.ssh_login","risk":"medium","types":["security:ssh"],"field":"type","pattern":"ssh","title":"SSH 登录活动","desc":"检测到 SSH 远程登录相关的活动，请确认来源是否是你本人或受信任的设备。"},
+  {"id":"security.db_query","risk":"low","types":["security:sql"],"field":"type","pattern":"sql","title":"数据库查询语句","desc":"捕获到一条数据库(MySQL/PostgreSQL)查询语句，便于审计数据访问行为。"},
+  {"id":"security.tls_plaintext","risk":"low","types":["security:tls"],"field":"type","pattern":"tls","title":"捕获到加密流量的明文内容","desc":"在数据被加密发送前(或解密后)拿到了原始内容，用于审计程序到底传输了什么，不代表数据被泄露。"},
+  {"id":"disk.large_write","risk":"low","types":["disk:write"],"field":"type","pattern":"write","title":"大量磁盘写入","desc":"程序正在进行较大量的磁盘写入操作，常见于下载、编译、日志或数据库写入。"}
+]

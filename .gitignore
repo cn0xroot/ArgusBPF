@@ -1,0 +1,24 @@
+# Project-specific: original Chinese requirements doc, not part of the
+# public source tree.
+需求.MD
+
+# Build output.
+/unix-monitor
+/dist/
+
+# Machine/kernel-specific BTF dump used only to regenerate the eBPF object
+# (`make bpf`); the compiled monitor_x86_bpfel.o + .go pair stay committed
+# so a plain `go build` works without clang/bpftool/root.
+/bpf/vmlinux.h
+
+# Runtime state (defaults to ~/.unix-monitor/, this only matters if someone
+# points --db/--rules inside the repo during development).
+/.unix-monitor/
+*.db
+*.db-wal
+*.db-shm
+
+# Go / editor noise.
+*.test
+*.out
+.DS_Store
