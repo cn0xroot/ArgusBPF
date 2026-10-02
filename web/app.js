@@ -457,10 +457,10 @@
   function refreshOverview() {
     api('/api/stats').then(function (st) {
       var cards = [
-        { label: '总事件数', value: st.total || 0, c: 'var(--accent)' },
-        { label: '高风险', value: (st.by_risk && st.by_risk.high) || 0, c: 'var(--red)' },
-        { label: '中风险', value: (st.by_risk && st.by_risk.medium) || 0, c: 'var(--yellow)' },
-        { label: '运行进程数', value: (sysHistory.length ? sysHistory[sysHistory.length - 1].procs : '–'), c: 'var(--green)' },
+        { label: I18N.t('card.totalEvents'), value: st.total || 0, c: 'var(--accent)', icon: 'pulse' },
+        { label: I18N.t('card.highRisk'), value: (st.by_risk && st.by_risk.high) || 0, c: 'var(--red)', icon: 'alertTriangle' },
+        { label: I18N.t('card.mediumRisk'), value: (st.by_risk && st.by_risk.medium) || 0, c: 'var(--yellow)', icon: 'alertCircle' },
+        { label: I18N.t('card.runningProcs'), value: (sysHistory.length ? sysHistory[sysHistory.length - 1].procs : '–'), c: 'var(--green)', icon: 'processes' },
       ];
       document.getElementById('ovCards').innerHTML = cards.map(cardHTML).join('');
       document.getElementById('rateNow').textContent = (st.rate && st.rate.length ? st.rate[st.rate.length - 1] : 0) + '/s';
@@ -497,8 +497,23 @@
     lastOverviewAlerts = risky.concat(lastOverviewAlerts).slice(0, 8);
     if (state.page === 'overview') renderOverviewAlerts();
   }
+  // Small stroke-icon paths (24x24 viewBox), reused between the stat
+  // cards here and the matching sidenav entries so the same shape always
+  // means the same thing across the app.
+  var ICONS = {
+    pulse: '<path d="M3 12h4l2-7 4 14 2-7h6"/>',
+    alertTriangle: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a1.8 1.8 0 0 0 1.6 2.7h16.8A1.8 1.8 0 0 0 22 18L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/>',
+    alertCircle: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+    processes: '<circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="12" r="2.4"/><path d="M6 8.4V15.6M8.3 12H15.7M8.1 7 15.7 10.6"/>',
+    network: '<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M7 7.3 10.3 16M17 7.3 13.7 16"/>',
+    checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5"/>',
+    radio: '<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9 9 0 0 0 0 13M18.5 5.5a9 9 0 0 1 0 13"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z"/>',
+    disk: '<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V18c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8V5.5"/><path d="M4 12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8"/>',
+  };
   function cardHTML(c) {
-    return '<div class="card"><div class="stripe" style="background:' + c.c + '"></div><div class="label">' + c.label + '</div><div class="value">' + c.value + '</div></div>';
+    var icon = c.icon ? '<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICONS[c.icon] + '</svg></div>' : '';
+    return '<div class="card" style="--c:' + c.c + '">' + icon + '<div class="label">' + c.label + '</div><div class="value">' + c.value + '</div></div>';
   }
 
   // ---------------- LIVE ----------------
@@ -623,10 +638,10 @@
     var listen = lastConns.filter(function (c) { return c.state === 'LISTEN'; }).length;
     var hosts = new Set(lastConns.map(function (c) { return c.remote ? c.remote.split(':')[0] : ''; }).filter(Boolean));
     document.getElementById('netCards').innerHTML = [
-      { label: '总连接数', value: lastConns.length, c: 'var(--accent)' },
-      { label: '已建立', value: est, c: 'var(--green)' },
-      { label: '监听中', value: listen, c: 'var(--cyan)' },
-      { label: '远程主机数', value: hosts.size, c: 'var(--accent-2)' },
+      { label: I18N.t('card.totalConns'), value: lastConns.length, c: 'var(--accent)', icon: 'network' },
+      { label: I18N.t('card.established'), value: est, c: 'var(--green)', icon: 'checkCircle' },
+      { label: I18N.t('card.listening'), value: listen, c: 'var(--cyan)', icon: 'radio' },
+      { label: I18N.t('card.remoteHosts'), value: hosts.size, c: 'var(--accent-2)', icon: 'globe' },
     ].map(cardHTML).join('');
   }
   function renderConns() {
@@ -657,7 +672,7 @@
     api('/api/disk').then(function (d) {
       document.getElementById('diskCards').innerHTML = (d.devices || []).map(function (dev) {
         var c = dev.util > 80 ? 'var(--red)' : dev.util > 40 ? 'var(--yellow)' : 'var(--green)';
-        return cardHTML({ label: dev.name, value: fmtBps(dev.read_bps + dev.write_bps), c: c });
+        return cardHTML({ label: dev.name, value: fmtBps(dev.read_bps + dev.write_bps), c: c, icon: 'disk' });
       }).join('') || '<div class="empty">暂无磁盘设备</div>';
       var pts = (d.blocks || []).map(function (b) {
         var col = b.op === 'read' ? 'var(--cyan)' : b.op === 'write' ? 'var(--cat-disk)' : 'var(--yellow)';

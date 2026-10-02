@@ -2,11 +2,11 @@
    Covers the static chrome (nav, page titles/intros, toolbars, table
    headers) applied via applyI18n() walking [data-i18n]/-ph/-title, plus a
    t(key) lookup app.js's own dynamic dictionaries (category/risk labels,
-   table headers it builds in JS, button text toggles) call into directly.
-   NOT covered: event content itself (plain/pro/analogy/rule_title) — that
-   text is generated server-side by internal/explain + internal/rules and
-   is Chinese-only for now; translating it is a backend i18n job, not this
-   file's. */
+   table headers, stat-card labels, button text toggles) call into
+   directly. Event content itself (plain/pro/analogy/rule_title) is
+   generated server-side with its own _en twin per field (see
+   internal/explain, internal/rules, internal/glossary, internal/sysinfo)
+   and picked per-language by app.js's evText() helper, not this file. */
 (function (global) {
   'use strict';
 
@@ -159,6 +159,15 @@
     'gloss.intro.pro': ['术语表：通俗解释 + 技术定义。', 'Glossary: plain explanation + technical definition.'],
     'gloss.qph': ['搜索术语', 'Search terms'],
     'gloss.all': ['全部', 'All'],
+
+    'card.totalEvents': ['总事件数', 'Total events'],
+    'card.highRisk': ['高风险', 'High risk'],
+    'card.mediumRisk': ['中风险', 'Medium risk'],
+    'card.runningProcs': ['运行进程数', 'Running processes'],
+    'card.totalConns': ['总连接数', 'Total connections'],
+    'card.established': ['已建立', 'Established'],
+    'card.listening': ['监听中', 'Listening'],
+    'card.remoteHosts': ['远程主机数', 'Remote hosts'],
 
     'risk.info': ['信息', 'Info'],
     'risk.low': ['低', 'Low'],

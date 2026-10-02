@@ -37,6 +37,23 @@
     return c;
   }
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+  // Traces a smooth curve through pts onto ctx's current path (no
+  // beginPath/stroke — the caller does both, so it can keep building the
+  // path for a fill afterwards). Quadratic-midpoint technique: each
+  // interior point becomes a control point and the curve actually passes
+  // through the midpoint to the next sample, landing exactly on the last
+  // point — cheap, no spline matrix, and good enough that LineChart's
+  // real-time data doesn't read as a jagged connect-the-dots any more.
+  function traceSmooth(ctx, pts) {
+    if (!pts.length) return;
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (var i = 1; i < pts.length - 1; i++) {
+      var mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2;
+      ctx.quadraticCurveTo(pts[i][0], pts[i][1], mx, my);
+    }
+    if (pts.length > 1) ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+  }
   // beeEyeShade maps one bucket's hue + 0..1 intensity to a real "rgb(...)"
   // string: saturate the hue, mix up from the dark ground by intensity,
   // gamma-correct so quiet buckets don't vanish, bloom toward warm white
@@ -188,13 +205,14 @@
     var x0 = padL + cw - (data.length - 1) * step;
     for (var k = 0; k < series.length; k++) {
       var se = series[k], col = this.color(se);
-      ctx.beginPath();
+      var pts = [];
       for (var p = 0; p < data.length; p++) {
         var val = data[p].v[se.key] || 0;
-        var px = x0 + p * step, py = padT + ch - Math.min(1, val / max) * ch;
-        if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        pts.push([x0 + p * step, padT + ch - Math.min(1, val / max) * ch]);
       }
-      ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.beginPath();
+      traceSmooth(ctx, pts);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke();
       if (se.fill !== false) {
         ctx.lineTo(x0 + (data.length - 1) * step, padT + ch); ctx.lineTo(x0, padT + ch); ctx.closePath();
         ctx.globalAlpha = .12; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
