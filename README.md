@@ -125,7 +125,7 @@ make build
 
 ## Architecture
 
-See [DESIGN.md](DESIGN.md) for the full design: event model, collection pipeline, risk rules, the plain/professional explanation engine, and the HTTP/WebSocket API contract used by `web/`.
+See [DESIGN.md](DESIGN.md) for the full design: event model, collection pipeline, risk rules, the plain/professional explanation engine, and the HTTP/WebSocket API contract used by `web/`. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ```
 collector (eBPF | poller) -> pipeline (rules + explain + 1s aggregation) -> SQLite + WebSocket hub -> web UI
