@@ -568,19 +568,27 @@
   }
   // Shared bar-list row renderer for the stat breakdowns on Overview and
   // the AI-activity page (by-cat/by-risk/by-type/rules/cmd-class/hosts all
-  // reduce to "label, count, bar relative to the top entry").
+  // reduce to "label, count, bar relative to the top entry"). An item with
+  // a `filter` object (see mapToSortedItems) renders clickable - the
+  // AI-activity page wires a delegated click handler (see loadAI) that
+  // turns it into an /api/events drilldown.
   function barListHTML(items, emptyKey) {
     if (!items.length) return '<div class="empty">' + I18N.t(emptyKey || 'empty.noData') + '</div>';
     var maxN = Math.max(1, items[0].count);
     return items.map(function (it) {
-      return '<div class="list-item"><span class="grow">' + it.label + '</span>' +
+      var cls = it.filter ? ' click' : '';
+      var attr = it.filter ? ' data-filter=\'' + JSON.stringify(it.filter).replace(/'/g, '&#39;') + '\'' : '';
+      return '<div class="list-item' + cls + '"' + attr + '><span class="grow">' + it.label + '</span>' +
         '<div class="bar-bg" style="width:80px"><div class="bar-fg" style="width:' + (100 * it.count / maxN) + '%"></div></div>' +
         '<span class="dim" style="width:40px;text-align:right">' + it.count + '</span></div>';
     }).join('');
   }
-  function mapToSortedItems(m, labelFn) {
-    return Object.keys(m || {}).map(function (k) { return { label: labelFn(k), count: m[k] }; })
-      .sort(function (a, b) { return b.count - a.count; });
+  // labelFn(key) -> display text; filterFn(key), if given, -> an
+  // /api/events-compatible filter object, making that row clickable.
+  function mapToSortedItems(m, labelFn, filterFn) {
+    return Object.keys(m || {}).map(function (k) {
+      return { label: labelFn(k), count: m[k], filter: filterFn ? filterFn(k) : null };
+    }).sort(function (a, b) { return b.count - a.count; });
   }
   var CMD_CLASS_LABELS = {
     git: 'cmdclass.git', ssh: 'cmdclass.ssh', filesend: 'cmdclass.filesend', docker: 'cmdclass.docker',
@@ -603,6 +611,7 @@
   ];
   var aiRulesCache = null; // id -> {title, title_en, risk}, fetched once
   function initAI() {
+    document.querySelector('#page-ai thead.evhead').innerHTML = evHeadHTML();
     var sel = document.getElementById('aiAgentSel');
     sel.innerHTML = '<option value="">' + esc(I18N.t('ai.agentAll')) + '</option>' +
       AI_AGENTS.map(function (a) { return '<option value="' + a[0] + '">' + esc(a[1]) + '</option>'; }).join('');
@@ -632,27 +641,46 @@
       ];
       document.getElementById('aiCards').innerHTML = cards.map(cardHTML).join('');
 
-      document.getElementById('aiByCat').innerHTML = barListHTML(mapToSortedItems(st.by_cat, catLabel));
-      document.getElementById('aiByRisk').innerHTML = barListHTML(mapToSortedItems(st.by_risk, riskLabel));
-      document.getElementById('aiByType').innerHTML = barListHTML(mapToSortedItems(st.by_type, function (k) { return k; }));
+      document.getElementById('aiByCat').innerHTML = barListHTML(mapToSortedItems(st.by_cat, catLabel, function (k) { return { cat: k }; }));
+      document.getElementById('aiByRisk').innerHTML = barListHTML(mapToSortedItems(st.by_risk, riskLabel, function (k) { return { risk: k }; }));
+      document.getElementById('aiByType').innerHTML = barListHTML(mapToSortedItems(st.by_type, function (k) { return k; }, function (k) { return { type: k }; }));
 
       document.getElementById('aiRules').innerHTML = barListHTML(mapToSortedItems(st.by_rule, function (id) {
         var ru = rules[id];
         return ru ? esc(evText(ru, 'title')) : esc(id);
+      }, function (id) { return { rule: id }; }));
+      document.getElementById('aiCmdClass').innerHTML = barListHTML(mapToSortedItems(st.cmd_class, function (k) { return esc(cmdClassLabel(k)); }, function (k) { return { cmdclass: k }; }));
+
+      document.getElementById('aiHosts').innerHTML = barListHTML((st.top_hosts || []).map(function (h) {
+        return { label: esc(h.host), count: h.count, filter: { q: h.host } };
+      }), 'empty.noConnections');
+
+      document.getElementById('aiTopProcs').innerHTML = barListHTML((st.top_procs || []).map(function (p) {
+        return { label: esc(p.comm) + ' <span class="dim">#' + p.pid + '</span>', count: p.count, filter: { pid: p.pid } };
       }));
-      document.getElementById('aiCmdClass').innerHTML = barListHTML(mapToSortedItems(st.cmd_class, function (k) { return esc(cmdClassLabel(k)); }));
-
-      document.getElementById('aiHosts').innerHTML = barListHTML((st.top_hosts || []).map(function (h) { return { label: esc(h.host), count: h.count }; }), 'empty.noConnections');
-
-      var top = (st.top_procs || []);
-      var maxN = Math.max(1, top[0] ? top[0].count : 1);
-      document.getElementById('aiTopProcs').innerHTML = top.length ? top.map(function (p) {
-        return '<div class="list-item"><span class="grow">' + esc(p.comm) + ' <span class="dim">#' + p.pid + '</span></span>' +
-          '<div class="bar-bg" style="width:80px"><div class="bar-fg" style="width:' + (100 * p.count / maxN) + '%"></div></div>' +
-          '<span class="dim" style="width:34px;text-align:right">' + p.count + '</span></div>';
-      }).join('') : '<div class="empty">' + I18N.t('empty.noData') + '</div>';
     }).catch(function () {});
   }
+  // Delegated click handler for the bar-list drilldowns above: any
+  // .list-item[data-filter] inside the AI-activity page fetches the
+  // matching events (merging its own filter with the page's agent
+  // selection and the global time range) into the shared panel under the
+  // stat cards, the same "click to see what's behind this number" pattern
+  // Timeline uses for its swimlane cells.
+  document.addEventListener('click', function (e) {
+    var row = e.target.closest('#page-ai .list-item[data-filter]');
+    if (!row) return;
+    var filter;
+    try { filter = JSON.parse(row.getAttribute('data-filter')); } catch (err) { return; }
+    var agent = document.getElementById('aiAgentSel').value;
+    var params = rangeParams(); params.limit = 300; if (agent) filter.agent = agent;
+    Object.keys(filter).forEach(function (k) { params[k] = filter[k]; });
+    api('/api/events', params).then(function (r) {
+      document.getElementById('aiDrillTitle').textContent = row.querySelector('.grow').textContent;
+      document.getElementById('aiDrillSub').textContent = I18N.t('unit.entries').replace('{n}', (r.events || []).length);
+      renderEvents(document.getElementById('aiDrillBody'), r.events || []);
+      document.getElementById('aiDrillTitle').closest('.panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }).catch(function () {});
+  });
 
   // ---------------- LIVE ----------------
   function liveFilterMatch(ev) {

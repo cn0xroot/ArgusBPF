@@ -307,6 +307,7 @@
     'ai.cmdClass': ['命令行为分类', 'Command behavior'],
     'ai.hosts': ['联网足迹（Top 目标）', 'Network footprint (top hosts)'],
     'ai.topProcs': ['最活跃进程', 'Most active processes'],
+    'ai.clickHint': ['点击上方数字查看对应事件', 'Click a number above to see the matching events'],
 
     'cmdclass.git': ['Git 操作', 'Git'],
     'cmdclass.ssh': ['SSH 操作', 'SSH'],

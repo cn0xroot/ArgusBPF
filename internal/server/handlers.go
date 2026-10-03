@@ -50,8 +50,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	f := store.Filter{
 		Cat: q.Get("cat"), Type: q.Get("type"), Risk: q.Get("risk"), Q: q.Get("q"), Agent: q.Get("agent"),
-		PID: pid, Since: qInt64(r, "since", 0), Until: qInt64(r, "until", 0),
+		Rule: q.Get("rule"), PID: pid, Since: qInt64(r, "since", 0), Until: qInt64(r, "until", 0),
 		Before: qInt64(r, "before", 0), Limit: qInt(r, "limit", 200),
+	}
+	if cc := q.Get("cmdclass"); cc != "" {
+		if f.Type == "" {
+			f.Type = "exec"
+		}
+		f.ExeAnyOf = store.CmdClassMembers[cc]
 	}
 	events, err := s.st.Query(f)
 	if err != nil {

@@ -124,13 +124,17 @@ func (s *Store) Insert(ev *event.Event) error {
 	return nil
 }
 
-// Filter selects events for Query. Risk is "", "low+", "medium+", "high".
+// Filter selects events for Query. Risk is "", "low+", "medium+", "high", or
+// one bare level ("info"/"low"/"medium") for an exact match - the AI-activity
+// page's risk-breakdown drilldown needs the exact level a bar counted, not
+// "this or worse".
 type Filter struct {
-	Cat, Type, Risk, Q, Agent string
-	PID                       int32
-	Since, Until              int64 // unix ms, 0 = unbounded
-	Before                    int64 // id cursor for pagination, 0 = none
-	Limit                     int
+	Cat, Type, Risk, Q, Agent, Rule string
+	PID                             int32
+	ExeAnyOf                        []string // exec events whose exe basename is one of these (see CmdClassMembers)
+	Since, Until                    int64    // unix ms, 0 = unbounded
+	Before                          int64    // id cursor for pagination, 0 = none
+	Limit                           int
 }
 
 func riskSet(min string) []string {
@@ -139,8 +143,8 @@ func riskSet(min string) []string {
 		return []string{"low", "medium", "high"}
 	case "medium+":
 		return []string{"medium", "high"}
-	case "high":
-		return []string{"high"}
+	case "high", "medium", "low", "info":
+		return []string{min}
 	default:
 		return nil
 	}
@@ -189,6 +193,18 @@ func (s *Store) Query(f Filter) ([]*event.Event, error) {
 		where = append(where, "(comm LIKE ? OR exe LIKE ? OR plain LIKE ? OR pro LIKE ? OR fields LIKE ?)")
 		q := "%" + f.Q + "%"
 		args = append(args, q, q, q, q, q)
+	}
+	if f.Rule != "" {
+		where = append(where, "rule = ?")
+		args = append(args, f.Rule)
+	}
+	if len(f.ExeAnyOf) > 0 {
+		ph := make([]string, len(f.ExeAnyOf))
+		for i, name := range f.ExeAnyOf {
+			ph[i] = "(exe = ? OR exe LIKE ?)"
+			args = append(args, name, "%/"+name)
+		}
+		where = append(where, "("+strings.Join(ph, " OR ")+")")
 	}
 	limit := f.Limit
 	if limit <= 0 || limit > 2000 {
@@ -420,43 +436,44 @@ func filterClause(sinceMs, untilMs int64, agent string) (string, []any) {
 // represents, the same idea as CC-Monitor's command-pattern rules but
 // matched against the actual resolved executable (from the exec() syscall
 // itself) rather than a regex over a shell command string.
+// CmdClassMembers is the single source of truth for exec-event command
+// classification: classifyExe() below and the /api/events?cmdclass= drilldown
+// (handleEvents) both derive from it, so the AI-activity page's "click a
+// count to see the matching events" always matches what was actually
+// counted.
+var CmdClassMembers = map[string][]string{
+	"git":               {"git", "gh"},
+	"ssh":               {"ssh", "sftp", "ssh-keygen", "ssh-copy-id", "ssh-add"},
+	"filesend":          {"scp", "rsync", "nc", "ncat", "netcat"},
+	"docker":            {"docker", "docker-compose", "podman", "nerdctl", "containerd", "runc"},
+	"download":          {"curl", "wget", "aria2c"},
+	"archive":           {"tar", "zip", "unzip", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz", "7z", "7za", "rar", "unrar"},
+	"netdiag":           {"ping", "ping6", "traceroute", "tracepath", "nmap", "dig", "nslookup", "host", "mtr"},
+	"procbg":            {"nohup", "screen", "tmux", "setsid", "disown", "at", "systemd-run"},
+	"install_pip":       {"pip", "pip3"},
+	"install_uv":        {"uv"},
+	"install_js":        {"npm", "yarn", "pnpm", "bun"},
+	"install_system":    {"apt", "apt-get", "yum", "dnf", "pacman", "brew", "port", "apk", "zypper", "dpkg", "rpm"},
+	"install_toolchain": {"rustup", "cargo", "nvm", "pyenv", "rbenv", "sdk", "go", "gvm"},
+	"reverseeng":        {"ida", "ida64", "ghidra", "r2", "radare2", "gdb", "objdump", "readelf", "nm"},
+}
+
+var exeNameToClass = func() map[string]string {
+	m := map[string]string{}
+	for bucket, names := range CmdClassMembers {
+		for _, n := range names {
+			m[n] = bucket
+		}
+	}
+	return m
+}()
+
 func classifyExe(path string) string {
 	name := path
 	if i := strings.LastIndexByte(name, '/'); i >= 0 {
 		name = name[i+1:]
 	}
-	switch name {
-	case "git", "gh":
-		return "git"
-	case "ssh", "sftp", "ssh-keygen", "ssh-copy-id", "ssh-add":
-		return "ssh"
-	case "scp", "rsync", "nc", "ncat", "netcat":
-		return "filesend"
-	case "docker", "docker-compose", "podman", "nerdctl", "containerd", "runc":
-		return "docker"
-	case "curl", "wget", "aria2c":
-		return "download"
-	case "tar", "zip", "unzip", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz", "7z", "7za", "rar", "unrar":
-		return "archive"
-	case "ping", "ping6", "traceroute", "tracepath", "nmap", "dig", "nslookup", "host", "mtr":
-		return "netdiag"
-	case "nohup", "screen", "tmux", "setsid", "disown", "at", "systemd-run":
-		return "procbg"
-	case "pip", "pip3":
-		return "install_pip"
-	case "uv":
-		return "install_uv"
-	case "npm", "yarn", "pnpm", "bun":
-		return "install_js"
-	case "apt", "apt-get", "yum", "dnf", "pacman", "brew", "port", "apk", "zypper", "dpkg", "rpm":
-		return "install_system"
-	case "rustup", "cargo", "nvm", "pyenv", "rbenv", "sdk", "go", "gvm":
-		return "install_toolchain"
-	case "ida", "ida64", "ghidra", "r2", "radare2", "gdb", "objdump", "readelf", "nm":
-		return "reverseeng"
-	default:
-		return ""
-	}
+	return exeNameToClass[name]
 }
 
 func fillCounts(db *sql.DB, q string, args []any, dst map[string]int64) error {
@@ -523,7 +540,10 @@ func (s *Store) Timeline(rangeSec int64, lane string) (Timeline, error) {
 	}
 	defer rows2.Close()
 
-	type cell struct{ n int; risk string }
+	type cell struct {
+		n    int
+		risk string
+	}
 	data := map[string]map[int64]cell{}
 	for rows2.Next() {
 		var name string
