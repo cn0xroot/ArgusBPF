@@ -107,7 +107,7 @@ Useful flags:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--listen` | `127.0.0.1:1024` | HTTP listen address |
+| `--listen` | `127.0.0.1:1024` | HTTP listen address — defaults to localhost-only; passing a non-loopback address (`0.0.0.0:1024`, a LAN IP, `:1024`) opens it up to the network and logs a startup warning when you do |
 | `--token` | *(none)* | Require `X-Token` header / `?token=` query param |
 | `--db` | `~/.argusbpf/events.db` | SQLite database path |
 | `--rules` | `~/.argusbpf/rules.json` | Override the built-in risk ruleset |

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +24,26 @@ import (
 	"argusbpf/internal/server"
 	"argusbpf/internal/store"
 )
+
+// isLoopbackListen reports whether addr (a --listen value) only accepts
+// connections from this machine. Used purely to decide whether to warn, so
+// it errs toward "not loopback" (returns false) for anything it can't
+// positively confirm - an unresolvable hostname, an empty host (Go's
+// net/http treats ":1024" as "every interface"), or anything else.
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 //go:embed web
 var webAssets embed.FS
@@ -47,6 +68,9 @@ func main() {
 	defer col.Close()
 
 	srv := server.New(st, re, col.Info(), *token, *enableTerminal)
+	if !isLoopbackListen(*listen) {
+		log.Printf("警告：监听地址 %s 并非仅本机可访问，网络上能连到这台机器的任何人都能看到/操作这个面板（如果开了 --enable-terminal，也包括打开终端）/ warning: listen address %s is not loopback-only - anyone on the network who can reach this machine can see/use this dashboard (including the terminal feature, if --enable-terminal is on)", *listen, *listen)
+	}
 	if *enableTerminal && *token == "" {
 		log.Println("警告：已启用 --enable-terminal 但未设置 --token，任何能访问此端口的人都可以打开终端 / warning: --enable-terminal is on with no --token set - anyone who can reach this port can open a shell")
 	}
