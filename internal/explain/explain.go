@@ -72,10 +72,14 @@ func explainProcess(ev *event.Event) {
 	case "exec":
 		path := ev.Str("path")
 		args := ev.Str("args")
+		plainZh, plainEn := fmt.Sprintf("启动了一个新程序：%s", shortPath(path, false)), fmt.Sprintf("Launched a new program: %s", shortPath(path, true))
+		if args != "" {
+			plainZh = fmt.Sprintf("运行了命令：%s", args)
+			plainEn = fmt.Sprintf("Ran the command: %s", args)
+		}
 		set(ev, "进程启动", "Process started",
 			fmt.Sprintf("execve(%q, [%s])", path, args),
-			fmt.Sprintf("启动了一个新程序：%s", shortPath(path, false)),
-			fmt.Sprintf("Launched a new program: %s", shortPath(path, true)),
+			plainZh, plainEn,
 			"就像按下了一个新 App 的开机键", "Like tapping the icon to launch a new app")
 	case "fork":
 		set(ev, "进程派生", "Process forked",

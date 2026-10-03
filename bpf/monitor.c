@@ -220,7 +220,46 @@ int handle_sys_enter(struct trace_event_raw_sys_enter *ctx) {
 		fill_common(e, EV_EXEC);
 		const char *path = (const char *)(id == NR_execve ? args[0] : args[1]);
 		e->str1_len = bpf_probe_read_user_str(e->str1, STR_LEN, path);
-		e->str2_len = 0;
+
+		// str1 above is the resolved executable (e.g. "/usr/bin/git");
+		// argv is what was actually typed (e.g. "git commit -m fix"),
+		// which is the command line the UI shows. Captured into 6 fixed
+		// 42-byte slots (6*42=252 <= STR_LEN) rather than one packed,
+		// dynamically-offset string: every bpf_probe_read_user_str
+		// destination below is a compile-time-constant offset into
+		// e->str2, which the verifier can check statically - a
+		// runtime-computed running offset into a 256B buffer is exactly
+		// the kind of pointer arithmetic it tends to reject. The nested
+		// ifs are an unrolled "stop at the first NULL argv slot" loop;
+		// decode_linux.go reads each slot back with cstr(), which
+		// already stops at the first NUL on its own.
+		const char *const *argv = (const char *const *)(id == NR_execve ? args[1] : args[2]);
+		__u16 argc = 0;
+		const char *a0 = NULL; bpf_probe_read_user(&a0, sizeof(a0), &argv[0]);
+		if (a0) {
+			bpf_probe_read_user_str(e->str2 + 0, 42, a0); argc = 1;
+			const char *a1 = NULL; bpf_probe_read_user(&a1, sizeof(a1), &argv[1]);
+			if (a1) {
+				bpf_probe_read_user_str(e->str2 + 42, 42, a1); argc = 2;
+				const char *a2 = NULL; bpf_probe_read_user(&a2, sizeof(a2), &argv[2]);
+				if (a2) {
+					bpf_probe_read_user_str(e->str2 + 84, 42, a2); argc = 3;
+					const char *a3 = NULL; bpf_probe_read_user(&a3, sizeof(a3), &argv[3]);
+					if (a3) {
+						bpf_probe_read_user_str(e->str2 + 126, 42, a3); argc = 4;
+						const char *a4 = NULL; bpf_probe_read_user(&a4, sizeof(a4), &argv[4]);
+						if (a4) {
+							bpf_probe_read_user_str(e->str2 + 168, 42, a4); argc = 5;
+							const char *a5 = NULL; bpf_probe_read_user(&a5, sizeof(a5), &argv[5]);
+							if (a5) {
+								bpf_probe_read_user_str(e->str2 + 210, 42, a5); argc = 6;
+							}
+						}
+					}
+				}
+			}
+		}
+		e->str2_len = argc; // slot count, not a byte length - see decode_linux.go
 		submit_event(ctx, e);
 		return 0;
 	}

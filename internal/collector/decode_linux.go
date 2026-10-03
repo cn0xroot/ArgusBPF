@@ -78,6 +78,46 @@ func cstr(b []byte, n uint16) string {
 	}
 	return string(s)
 }
+
+// argvSlotLen/argvSlots match the fixed-width layout bpf/monitor.c packs
+// into Str2 for exec events (see its NR_execve/NR_execveat case): argc
+// consecutive 42-byte slots rather than one packed, dynamically-offset
+// string, because the eBPF verifier can check a compile-time-constant
+// write offset into a 256B buffer but not a runtime-computed one.
+const (
+	argvSlotLen = 42
+	argvSlots   = 6
+)
+
+// argvCmdline reassembles those slots into a shell-like display string
+// (e.g. "git commit -m fix"), distinct from Str1's resolved executable
+// path (e.g. "/usr/bin/git"). Each slot is cstr()-trimmed independently:
+// the per-CPU scratch event struct is reused across invocations, so a
+// short argument in a slot that previously held a longer one leaves stale
+// bytes after its own NUL, which cstr() already stops at.
+func argvCmdline(buf []byte, slots uint16) string {
+	if slots > argvSlots {
+		slots = argvSlots
+	}
+	parts := make([]string, 0, slots)
+	for i := uint16(0); i < slots; i++ {
+		start := int(i) * argvSlotLen
+		end := start + argvSlotLen
+		if end > len(buf) {
+			break
+		}
+		s := cstr(buf[start:end], argvSlotLen)
+		if s == "" {
+			continue
+		}
+		if strings.ContainsAny(s, " \t\n") {
+			s = `"` + s + `"`
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, " ")
+}
+
 func indexZero(b []byte) int {
 	for i, c := range b {
 		if c == 0 {
@@ -119,7 +159,7 @@ func resolveCwdPath(pid uint32, path string) string {
 func toEvent(r *rawEvent) (*event.Event, bool) {
 	comm := cstr(r.Comm[:], uint16(len(r.Comm)))
 	ev := &event.Event{
-		TS: time.Now().UnixMilli(),
+		TS:  time.Now().UnixMilli(),
 		PID: int32(r.Pid), PPID: int32(r.Ppid), TID: int32(r.Tid),
 		UID: r.Uid, User: uidName(r.Uid), Comm: comm,
 	}
@@ -128,6 +168,9 @@ func toEvent(r *rawEvent) (*event.Event, bool) {
 		path := resolveCwdPath(r.Pid, cstr(r.Str1[:], r.Str1Len))
 		ev.Cat, ev.Type, ev.Exe = event.CatProcess, "exec", path
 		ev.SetField("path", path)
+		if args := argvCmdline(r.Str2[:], r.Str2Len); args != "" {
+			ev.SetField("args", args)
+		}
 	case evExit:
 		ev.Cat, ev.Type = event.CatProcess, "exit"
 		ev.SetField("code", r.Arg[0])
