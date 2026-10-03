@@ -5,21 +5,36 @@
 # service for always-on root/eBPF collection.
 #
 # Usage: ./install.sh [--prefix /usr/local/bin] [--systemd] [--no-build]
-#   --systemd   also install + enable a systemd unit (requires root)
-#   --no-build  skip `go build`, just (re)install an existing ./argusbpf
+#                      [--enable-terminal | --disable-terminal] [--token VALUE | --no-token]
+#   --systemd          also install + enable a systemd unit (requires root)
+#   --no-build         skip `go build`, just (re)install an existing ./argusbpf
+#   --enable-terminal  turn on the PTY web terminal in the installed systemd unit
+#   --disable-terminal turn it back off
+#   --token VALUE      set the systemd unit's --token
+#   --no-token         clear it
+# (the four --*terminal/--*token flags only matter with --systemd: re-running
+# this script without them leaves an existing unit's current setting alone
+# instead of silently resetting it - see the --systemd block below)
 set -euo pipefail
 
 PREFIX="/usr/local/bin"
 WITH_SYSTEMD=0
 DO_BUILD=1
+ENABLE_TERMINAL=""   # "", "1" or "0" - "" means "leave whatever the existing unit has"
+TOKEN_ARG=""         # ""  means "leave whatever the existing unit has"
+TOKEN_CLEAR=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--prefix) PREFIX="$2"; shift 2 ;;
 	--systemd) WITH_SYSTEMD=1; shift ;;
 	--no-build) DO_BUILD=0; shift ;;
+	--enable-terminal) ENABLE_TERMINAL=1; shift ;;
+	--disable-terminal) ENABLE_TERMINAL=0; shift ;;
+	--token) TOKEN_ARG="$2"; shift 2 ;;
+	--no-token) TOKEN_CLEAR=1; shift ;;
 	-h | --help)
-		sed -n '2,10p' "$0"
+		sed -n '2,17p' "$0"
 		exit 0
 		;;
 	*)
@@ -77,6 +92,33 @@ if [ "$WITH_SYSTEMD" -eq 1 ]; then
 		exit 1
 	fi
 	UNIT=/etc/systemd/system/argusbpf.service
+
+	# This always regenerates the unit file from scratch, which would
+	# otherwise silently wipe out --enable-terminal/--token on every
+	# redeploy (the normal "pick up a rebuilt binary" workflow): carry
+	# forward whatever the existing unit already has unless this run
+	# explicitly asked to change it.
+	EXISTING_ENABLE_TERMINAL=0
+	EXISTING_TOKEN=""
+	if [ -f "$UNIT" ]; then
+		EXISTING_LINE="$(grep '^ExecStart=' "$UNIT" || true)"
+		case "$EXISTING_LINE" in *" --enable-terminal"*) EXISTING_ENABLE_TERMINAL=1 ;; esac
+		EXISTING_TOKEN="$(printf '%s' "$EXISTING_LINE" | grep -oP '(?<= --token )\S+' || true)"
+	fi
+	FINAL_ENABLE_TERMINAL="$EXISTING_ENABLE_TERMINAL"
+	[ -n "$ENABLE_TERMINAL" ] && FINAL_ENABLE_TERMINAL="$ENABLE_TERMINAL"
+	FINAL_TOKEN="$EXISTING_TOKEN"
+	[ -n "$TOKEN_ARG" ] && FINAL_TOKEN="$TOKEN_ARG"
+	[ "$TOKEN_CLEAR" -eq 1 ] && FINAL_TOKEN=""
+
+	EXTRA_ARGS=""
+	[ "$FINAL_ENABLE_TERMINAL" -eq 1 ] && EXTRA_ARGS="$EXTRA_ARGS --enable-terminal"
+	[ -n "$FINAL_TOKEN" ] && EXTRA_ARGS="$EXTRA_ARGS --token $FINAL_TOKEN"
+	if [ "$FINAL_ENABLE_TERMINAL" -eq 1 ] && [ -z "$FINAL_TOKEN" ]; then
+		say "warning: --enable-terminal is on with no --token set - anyone who can reach this port can open a shell."
+		sayzh "警告：--enable-terminal 已开启但未设置 --token，任何能访问此端口的人都可以打开终端。"
+	fi
+
 	say "Installing systemd unit at $UNIT ..."
 	sayzh "正在安装 systemd 服务到 $UNIT …"
 	cat >"$UNIT" <<EOF
@@ -85,7 +127,7 @@ Description=ArgusBPF — system & AI-agent activity dashboard (eBPF)
 After=network.target
 
 [Service]
-ExecStart=$PREFIX/argusbpf --listen 127.0.0.1:1024
+ExecStart=$PREFIX/argusbpf --listen 127.0.0.1:1024$EXTRA_ARGS
 Restart=on-failure
 RestartSec=2
 # eBPF needs root (or CAP_BPF+CAP_PERFMON+CAP_SYS_ADMIN depending on kernel).
