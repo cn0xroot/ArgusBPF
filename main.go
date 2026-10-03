@@ -106,6 +106,14 @@ func main() {
 
 	info := col.Info()
 	fmt.Printf("ArgusBPF 已启动：http://%s （采集后端：%s）\n", *listen, info.Backend)
+	if *token != "" {
+		// The token was already typed in cleartext as a CLI flag (visible
+		// in `ps`, the systemd unit file, shell history, ...), so echoing
+		// it back here isn't a new exposure - it just saves having to go
+		// dig it back out of one of those places every time.
+		fmt.Printf("访问地址（含 token）：http://%s/?token=%s\n", *listen, *token)
+		fmt.Printf("Access URL (with token): http://%s/?token=%s\n", *listen, *token)
+	}
 	if len(info.Warnings) > 0 {
 		fmt.Println("提示：")
 		for _, w := range info.Warnings {
