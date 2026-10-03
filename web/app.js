@@ -459,11 +459,24 @@
     charts.net = new Charts.LineChart(document.getElementById('chNet'), { series: [{ key: 'rx', color: 'var(--green)', label: I18N.t('chart.rx') }, { key: 'tx', color: 'var(--accent-2)', label: I18N.t('chart.tx') }], fmt: fmtBps, legend: document.getElementById('legNet') });
     charts.rate = new Charts.LineChart(document.getElementById('chRate'), { series: [{ key: 'v', color: 'var(--accent)', label: I18N.t('chart.evPerSec') }], fmt: function (v) { return v.toFixed(0); }, legend: document.getElementById('legRate') });
     loadHostInfo();
-    api('/api/system/history').then(function (r) {
-      (r.samples || []).forEach(pushOverviewPoint);
-    }).catch(function () {});
+    loadOverviewHistory();
     refreshFns.overview = refreshOverview;
     refreshOverview(true);
+  }
+  function loadOverviewHistory() {
+    api('/api/system/history', rangeParams()).then(function (r) {
+      // Replace, don't append: this can run again after the range picker
+      // changes, and the previously-loaded window's points would otherwise
+      // stick around mixed in with the new one.
+      ['cpu', 'mem', 'disk', 'net'].forEach(function (k) { if (charts[k]) charts[k].data = []; });
+      (r.samples || []).forEach(pushOverviewPoint);
+      // pushOverviewPoint draws as it goes, but an empty result (e.g. a
+      // range older than what's retained) needs an explicit redraw to
+      // actually clear whatever the chart was showing before.
+      if (!(r.samples || []).length) {
+        ['cpu', 'mem', 'disk', 'net'].forEach(function (k) { if (charts[k]) charts[k].draw(); });
+      }
+    }).catch(function () {});
   }
   function pushOverviewPoint(s) {
     if (!charts.cpu) return;
@@ -483,8 +496,15 @@
     var nr = 0, nt = 0; (s.nets || []).forEach(function (n) { nr += n.rx_bps; nt += n.tx_bps; });
     var nn = document.getElementById('netNow'); if (nn) nn.textContent = fmtBps(nr + nt);
   }
-  function refreshOverview() {
-    api('/api/stats').then(function (st) {
+  function refreshOverview(force) {
+    // The CPU/mem/disk/net charts are fed incrementally by WS "sys"
+    // snapshots (onSysSnapshot -> pushOverviewPoint) the rest of the time;
+    // re-pulling the whole history on every tick would be wasteful and
+    // would fight with that. Only do it when something explicitly asked
+    // for current data - the initial page load, the refresh button, or a
+    // range-picker change (all call refreshCurrent(true), see setRange()).
+    if (force) loadOverviewHistory();
+    api('/api/stats', rangeParams()).then(function (st) {
       var cards = [
         { label: I18N.t('card.totalEvents'), value: st.total || 0, c: 'var(--accent)', icon: 'pulse' },
         { label: I18N.t('card.highRisk'), value: (st.by_risk && st.by_risk.high) || 0, c: 'var(--red)', icon: 'alertTriangle' },

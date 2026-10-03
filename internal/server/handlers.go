@@ -62,7 +62,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	st, err := s.st.Stats(s.startedMs)
+	st, err := s.st.Stats(s.startedMs, qInt64(r, "since", 0), qInt64(r, "until", 0))
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -99,9 +99,28 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSystemHistory(w http.ResponseWriter, r *http.Request) {
+	since, until := qInt64(r, "since", 0), qInt64(r, "until", 0)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	writeJSON(w, map[string]any{"samples": s.history})
+	samples := s.history
+	if since > 0 || until > 0 {
+		// s.history only ever holds a short in-memory window (see its cap in
+		// server.go), so a range wider than that just returns everything
+		// available rather than actually reaching further back - there's no
+		// persisted system-metrics history to query instead.
+		filtered := make([]sysinfo.Snapshot, 0, len(samples))
+		for _, snap := range samples {
+			if since > 0 && snap.TS < since {
+				continue
+			}
+			if until > 0 && snap.TS > until {
+				continue
+			}
+			filtered = append(filtered, snap)
+		}
+		samples = filtered
+	}
+	s.mu.RUnlock()
+	writeJSON(w, map[string]any{"samples": samples})
 }
 
 func (s *Server) handleProcesses(w http.ResponseWriter, r *http.Request) {

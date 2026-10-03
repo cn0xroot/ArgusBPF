@@ -256,25 +256,36 @@ type TopProc struct {
 	N    int64  `json:"count"`
 }
 
-func (s *Store) Stats(startedMs int64) (Stats, error) {
+// Stats summarizes activity in [sinceMs, untilMs]; either bound may be 0 to
+// leave that side open (0, 0 is "all time", matching the old unscoped
+// behavior). Rate is the one exception - it's always the last 60 real
+// seconds regardless of the window, since it's a live pulse indicator
+// rather than a historical figure.
+func (s *Store) Stats(startedMs, sinceMs, untilMs int64) (Stats, error) {
 	st := Stats{ByCat: map[string]int64{}, ByRisk: map[string]int64{}, ByType: map[string]int64{}, Started: startedMs}
 
-	row := s.db.QueryRow("SELECT COUNT(*) FROM events")
+	where, args := tsRangeClause(sinceMs, untilMs)
+
+	row := s.db.QueryRow("SELECT COUNT(*) FROM events"+where, args...)
 	if err := row.Scan(&st.Total); err != nil {
 		return st, err
 	}
-	if err := fillCounts(s.db, "SELECT cat, COUNT(*) FROM events GROUP BY cat", st.ByCat); err != nil {
+	if err := fillCounts(s.db, "SELECT cat, COUNT(*) FROM events"+where+" GROUP BY cat", args, st.ByCat); err != nil {
 		return st, err
 	}
-	if err := fillCounts(s.db, "SELECT risk, COUNT(*) FROM events GROUP BY risk", st.ByRisk); err != nil {
+	if err := fillCounts(s.db, "SELECT risk, COUNT(*) FROM events"+where+" GROUP BY risk", args, st.ByRisk); err != nil {
 		return st, err
 	}
-	if err := fillCounts(s.db, "SELECT type, COUNT(*) FROM events GROUP BY type", st.ByType); err != nil {
+	if err := fillCounts(s.db, "SELECT type, COUNT(*) FROM events"+where+" GROUP BY type", args, st.ByType); err != nil {
 		return st, err
 	}
 
-	rows, err := s.db.Query(`SELECT pid, comm, COUNT(*) n FROM events WHERE ts > ? GROUP BY pid, comm ORDER BY n DESC LIMIT 10`,
-		time.Now().Add(-10*time.Minute).UnixMilli())
+	topSince := sinceMs
+	if topSince == 0 {
+		topSince = time.Now().Add(-10 * time.Minute).UnixMilli()
+	}
+	topWhere, topArgs := tsRangeClause(topSince, untilMs)
+	rows, err := s.db.Query(`SELECT pid, comm, COUNT(*) n FROM events`+topWhere+` GROUP BY pid, comm ORDER BY n DESC LIMIT 10`, topArgs...)
 	if err != nil {
 		return st, err
 	}
@@ -304,8 +315,24 @@ func (s *Store) Stats(startedMs int64) (Stats, error) {
 	return st, nil
 }
 
-func fillCounts(db *sql.DB, q string, dst map[string]int64) error {
-	rows, err := db.Query(q)
+// tsRangeClause builds a " WHERE ts ..." fragment for an optional
+// [sinceMs, untilMs] window; either bound may be 0 to leave that side open,
+// and (0, 0) yields an empty clause (no filtering at all).
+func tsRangeClause(sinceMs, untilMs int64) (string, []any) {
+	switch {
+	case sinceMs > 0 && untilMs > 0:
+		return " WHERE ts >= ? AND ts <= ?", []any{sinceMs, untilMs}
+	case sinceMs > 0:
+		return " WHERE ts >= ?", []any{sinceMs}
+	case untilMs > 0:
+		return " WHERE ts <= ?", []any{untilMs}
+	default:
+		return "", nil
+	}
+}
+
+func fillCounts(db *sql.DB, q string, args []any, dst map[string]int64) error {
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return err
 	}
