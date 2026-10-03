@@ -43,7 +43,12 @@ if [ "$DO_BUILD" -eq 1 ]; then
 	fi
 	say "Building argusbpf..."
 	sayzh "正在编译 argusbpf…"
-	go build -o argusbpf .
+	# CGO_ENABLED=0: without it, Go links dynamically against this host's
+	# glibc instead of producing the static binary this project is meant
+	# to be, which then fails to start on a different machine/image with a
+	# different (or no) libc - e.g. deploying the binary built here onto a
+	# device's own root filesystem instead of running it in place.
+	CGO_ENABLED=0 go build -o argusbpf .
 fi
 
 if [ ! -x ./argusbpf ]; then

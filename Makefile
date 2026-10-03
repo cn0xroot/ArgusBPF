@@ -7,8 +7,15 @@ VMLINUX := bpf/vmlinux.h
 
 ## Plain build using the already-committed eBPF object (no clang/bpftool
 ## needed). This is what CI / most contributors should use.
+##
+## CGO_ENABLED=0 is not optional here: with it left at the host's default
+## (usually 1 when a C toolchain is present), Go dynamically links against
+## the build host's glibc instead of producing the static binary this
+## project is designed to be - it'll still run on the machine that built
+## it, but silently fails to start on another one (e.g. a target device's
+## root filesystem) with a different/missing libc.
 build:
-	go build -o $(BINARY) .
+	CGO_ENABLED=0 go build -o $(BINARY) .
 
 run: build
 	./$(BINARY)
@@ -29,11 +36,15 @@ bpf: $(VMLINUX)
 		Monitor ../../$(BPF_SRC)
 
 ## Sanity-check cross-compilation for the poll-only fallback platforms.
+## CGO_ENABLED=0 again: cross-compiling cgo code needs a per-target C
+## toolchain this doesn't assume is installed, and these targets don't
+## have one anyway (the eBPF collector itself is linux/amd64-only - see
+## the GOOS/GOARCH build tags on internal/collector/new_linux_amd64.go).
 cross:
-	GOOS=darwin  GOARCH=arm64 go build -o /tmp/$(BINARY)-darwin-arm64  .
-	GOOS=darwin  GOARCH=amd64 go build -o /tmp/$(BINARY)-darwin-amd64  .
-	GOOS=windows GOARCH=amd64 go build -o /tmp/$(BINARY)-windows.exe   .
-	GOOS=linux   GOARCH=arm64 go build -o /tmp/$(BINARY)-linux-arm64   .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -o /tmp/$(BINARY)-darwin-arm64  .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -o /tmp/$(BINARY)-darwin-amd64  .
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /tmp/$(BINARY)-windows.exe   .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -o /tmp/$(BINARY)-linux-arm64   .
 
 clean:
 	rm -f $(BINARY) $(VMLINUX)
