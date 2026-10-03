@@ -86,6 +86,19 @@
     return fetch(path + qs(params || {}), { headers: TOKEN ? { 'X-Token': TOKEN } : {} })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
   }
+  function apiPost(path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (TOKEN) headers['X-Token'] = TOKEN;
+    return fetch(path, { method: 'POST', headers: headers, body: JSON.stringify(body || {}) })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+        return r.json();
+      });
+  }
+  function apiDelete(path) {
+    return fetch(path, { method: 'DELETE', headers: TOKEN ? { 'X-Token': TOKEN } : {} })
+      .then(function (r) { if (!r.ok && r.status !== 204) throw new Error('HTTP ' + r.status); });
+  }
   function isPro() { return state.mode === 'pro'; }
   function debounce(fn, ms) { var t; return function () { clearTimeout(t); var a = arguments; t = setTimeout(function () { fn.apply(null, a); }, ms); }; }
 
@@ -293,6 +306,7 @@
       if (glossaryRender) glossaryRender();
       var aiAllOpt = document.querySelector('#aiAgentSel option[value=""]');
       if (aiAllOpt) aiAllOpt.textContent = I18N.t('ai.agentAll');
+      if (termSessions.length) renderTermList(); // (grid cells aren't re-rendered here: that would tear down and reconnect every live session just for a language toggle)
       renderOverviewAlerts();
       repaintDot();
       // Chart series labels are set once at construction (initOverview),
@@ -1077,6 +1091,185 @@
     }).catch(function () {});
   }
 
+  // ---------------- TERMINAL (only reachable when the server was started
+  // with --enable-terminal; see /api/info's terminal_enabled) ----------------
+  var termSessions = [];   // [{id,cmd,started,alive}], mirrors GET /api/terminal/sessions
+  var termCurrentId = null;
+  var termGridMode = false;
+  var termInstances = {};  // session id -> { term, fit, ws, sendResize }
+
+  function termWsUrl(id) {
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    return proto + location.host + '/ws/terminal/' + encodeURIComponent(id) + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+  }
+  function termMakeInstance(container) {
+    var term = new Terminal({ convertEol: true, fontSize: 13, cursorBlink: true, theme: { background: '#000000' } });
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(container);
+    try { fit.fit(); } catch (e) {}
+    return { term: term, fit: fit };
+  }
+  // Wires one xterm.js instance to its session's WebSocket: binary frames
+  // carry raw PTY bytes in both directions, text frames carry the small
+  // JSON control vocabulary (today: client->server resize, server->client
+  // exit) - see internal/server/terminal.go's termCtl for the other side.
+  function termConnect(id, term, fit) {
+    var ws = new WebSocket(termWsUrl(id));
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = function (e) {
+      if (typeof e.data === 'string') {
+        var ctl; try { ctl = JSON.parse(e.data); } catch (err) { return; }
+        if (ctl.type === 'exit') { term.write('\r\n\x1b[2m[' + I18N.t('terminal.ended') + ']\x1b[0m\r\n'); loadTermSessions(); }
+        return;
+      }
+      term.write(new Uint8Array(e.data));
+    };
+    term.onData(function (data) { if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data)); });
+    function sendResize() {
+      try { fit.fit(); } catch (e) {}
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+    }
+    ws.onopen = sendResize;
+    return { ws: ws, sendResize: sendResize };
+  }
+  function termTeardownAll() {
+    Object.keys(termInstances).forEach(function (id) {
+      var inst = termInstances[id];
+      try { inst.ws.close(); } catch (e) {}
+      try { inst.term.dispose(); } catch (e) {}
+    });
+    termInstances = {};
+  }
+  function termShow(which) {
+    document.getElementById('termEmpty').hidden = which !== 'empty';
+    document.getElementById('termStatusline').hidden = which !== 'single';
+    document.getElementById('termView').hidden = which !== 'single';
+    document.getElementById('termGrid').hidden = which !== 'grid';
+  }
+  function termSelectSession(id) {
+    termGridMode = false;
+    document.getElementById('termGridToggle').classList.remove('on');
+    termTeardownAll();
+    termCurrentId = id;
+    renderTermList();
+    termShow('single');
+    var view = document.getElementById('termView');
+    view.innerHTML = '';
+    var mk = termMakeInstance(view);
+    var conn = termConnect(id, mk.term, mk.fit);
+    termInstances[id] = { term: mk.term, fit: mk.fit, ws: conn.ws, sendResize: conn.sendResize };
+    var s = termSessions.filter(function (x) { return x.id === id; })[0];
+    document.getElementById('termStatusline').textContent = (s ? s.cmd : id) + (s && !s.alive ? ' · ' + I18N.t('terminal.ended') : '');
+  }
+  function renderTermGrid() {
+    var gridEl = document.getElementById('termGrid');
+    gridEl.innerHTML = '';
+    termSessions.forEach(function (s) {
+      var cell = document.createElement('div');
+      cell.className = 'term-grid-cell';
+      cell.innerHTML = '<div class="term-grid-head"><span class="mono">' + esc(s.cmd) + '</span><span class="dim">' + (s.alive ? '' : esc(I18N.t('terminal.ended'))) + '</span></div><div class="term-grid-body"></div>';
+      cell.addEventListener('click', function () {
+        document.querySelectorAll('.term-grid-cell').forEach(function (c) { c.classList.remove('focused'); });
+        cell.classList.add('focused');
+        var inst = termInstances[s.id]; if (inst) inst.term.focus();
+      });
+      gridEl.appendChild(cell);
+      var mk = termMakeInstance(cell.querySelector('.term-grid-body'));
+      var conn = termConnect(s.id, mk.term, mk.fit);
+      termInstances[s.id] = { term: mk.term, fit: mk.fit, ws: conn.ws, sendResize: conn.sendResize };
+    });
+  }
+  function termToggleGrid() {
+    termGridMode = !termGridMode;
+    document.getElementById('termGridToggle').classList.toggle('on', termGridMode);
+    termTeardownAll();
+    if (termGridMode) {
+      termCurrentId = null;
+      termShow(termSessions.length ? 'grid' : 'empty');
+      renderTermGrid();
+    } else if (termCurrentId) {
+      termSelectSession(termCurrentId);
+      return; // already re-rendered the list
+    } else {
+      termShow('empty');
+    }
+    renderTermList();
+  }
+  function termCreateSession(cmd, newWindow) {
+    apiPost('/api/terminal/sessions', { cmd: cmd }).then(function (info) {
+      document.getElementById('termNewCmd').value = '';
+      return loadTermSessions().then(function () {
+        if (newWindow) {
+          var url = location.pathname + '?lang=' + I18N.lang() + '&termSession=' + encodeURIComponent(info.id) + '#terminal';
+          window.open(url, '_blank');
+        } else if (!termGridMode) {
+          termSelectSession(info.id);
+        } else {
+          renderTermGrid();
+        }
+      });
+    }).catch(function (err) { alert(String((err && err.message) || err)); });
+  }
+  function termCloseSession(id) {
+    apiDelete('/api/terminal/sessions/' + encodeURIComponent(id)).then(function () {
+      if (termInstances[id]) { try { termInstances[id].ws.close(); } catch (e) {} try { termInstances[id].term.dispose(); } catch (e) {} delete termInstances[id]; }
+      if (termCurrentId === id) { termCurrentId = null; termShow('empty'); }
+      loadTermSessions();
+    }).catch(function () {});
+  }
+  function renderTermList() {
+    var list = document.getElementById('termList');
+    if (!list) return;
+    list.innerHTML = termSessions.map(function (s) {
+      return '<div class="term-session-item' + (s.id === termCurrentId ? ' active' : '') + '" data-id="' + esc(s.id) + '">' +
+        '<span class="dot' + (s.alive ? ' alive' : '') + '"></span><span class="name">' + esc(s.cmd) + '</span>' +
+        '<span class="close-btn">×</span></div>';
+    }).join('') || '<div class="empty">' + I18N.t('empty.noData') + '</div>';
+  }
+  function loadTermSessions() {
+    return api('/api/terminal/sessions').then(function (r) {
+      termSessions = r.sessions || [];
+      renderTermList();
+      if (termGridMode) renderTermGrid();
+    }).catch(function () {});
+  }
+  function wireTerminalUI() {
+    document.getElementById('termNewBtn').addEventListener('click', function () {
+      termCreateSession(document.getElementById('termNewCmd').value.trim(), false);
+    });
+    document.getElementById('termNewWindowBtn').addEventListener('click', function () {
+      termCreateSession(document.getElementById('termNewCmd').value.trim(), true);
+    });
+    document.getElementById('termGridToggle').addEventListener('click', termToggleGrid);
+    document.getElementById('termList').addEventListener('click', function (e) {
+      var closeBtn = e.target.closest('.close-btn');
+      var row = e.target.closest('.term-session-item');
+      if (!row) return;
+      if (closeBtn) { e.stopPropagation(); termCloseSession(row.dataset.id); }
+      else if (termGridMode) { var inst = termInstances[row.dataset.id]; if (inst) inst.term.focus(); }
+      else termSelectSession(row.dataset.id);
+    });
+    window.addEventListener('resize', debounce(function () {
+      if (state.page !== 'terminal') return;
+      Object.keys(termInstances).forEach(function (id) { termInstances[id].sendResize(); });
+    }, 150));
+  }
+  function initTerminal() {
+    api('/api/info').then(function (info) {
+      if (!info.terminal_enabled) return;
+      document.getElementById('navTerminal').hidden = false;
+      if (PAGE_IDS.indexOf('terminal') === -1) PAGE_IDS.push('terminal');
+      wireTerminalUI();
+      refreshFns.terminal = function () { loadTermSessions(); };
+      loadTermSessions().then(function () {
+        var want = new URLSearchParams(location.search).get('termSession');
+        if (want && termSessions.some(function (s) { return s.id === want; })) termSelectSession(want);
+      });
+      if (location.hash === '#terminal') route(); // correct an early overview-redirect from before this resolved
+    }).catch(function () {});
+  }
+
   // ---------------- boot ----------------
   function init() {
     initChrome();
@@ -1090,6 +1283,7 @@
     initProc();
     initAlerts();
     initGlossary();
+    initTerminal();
     initWS();
     route();
   }

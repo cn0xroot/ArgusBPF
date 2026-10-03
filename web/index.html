@@ -6,6 +6,11 @@
 <title>ArgusBPF</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f8cff'/%3E%3Cpath d='M6 18h5l3-8 4 14 3-6h5' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
+<!-- Vendored (not CDN) so the UI stays fully offline-capable; see
+     web/vendor/xterm/LICENSE (MIT). Only used by the Terminal page, which
+     itself only appears when the server was started with
+     --enable-terminal. -->
+<link rel="stylesheet" href="vendor/xterm/xterm.css">
 <script>
   (function () {
     try {
@@ -34,6 +39,8 @@
     <a href="#proc" data-page="proc" data-i18n-title="nav.proc"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="12" r="2.4"/><path d="M6 8.4V15.6M8.3 12H15.7M8.1 7 15.7 10.6"/></svg></i><span data-i18n="nav.proc">进程</span></a>
     <a href="#alerts" data-page="alerts" data-i18n-title="nav.alerts"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></i><span data-i18n="nav.alerts">告警</span><b class="badge-count" id="alertBadge" hidden>0</b></a>
     <a href="#glossary" data-page="glossary" data-i18n-title="nav.glossary"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg></i><span data-i18n="nav.glossary">知识库</span></a>
+    <!-- Only shown when the server reports terminal_enabled (--enable-terminal) - see initTerminal() in app.js. -->
+    <a href="#terminal" data-page="terminal" id="navTerminal" hidden data-i18n-title="nav.terminal"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></i><span data-i18n="nav.terminal">终端会话</span></a>
   </nav>
 </aside>
 <div class="shell">
@@ -388,6 +395,36 @@
     </div>
     <div class="gloss-grid" id="glGrid"></div>
   </section>
+
+  <!-- ============ 终端会话 ============ -->
+  <!-- Only reachable via navTerminal above, which stays hidden unless the
+       server reports terminal_enabled - see initTerminal() in app.js. -->
+  <section class="page" id="page-terminal">
+    <div class="page-head">
+      <div>
+        <h1 data-i18n="terminal.title">终端会话</h1>
+        <p class="page-intro plain-only" data-i18n="terminal.intro.plain">在网页里直接开一个真实终端，运行任何命令（比如一个 AI 编码 Agent CLI），不用再切到终端软件。</p>
+        <p class="page-intro pro-only" data-i18n="terminal.intro.pro">PTY-backed 终端会话，WebSocket 双向传输；可同时开多个会话，支持网格视图同屏查看。</p>
+      </div>
+    </div>
+    <div class="term-shell">
+      <aside class="term-sidebar">
+        <div class="term-new">
+          <input class="input" id="termNewCmd" data-i18n-ph="terminal.cmdPh" placeholder="要运行的命令，例如 claude / bash / codex">
+          <button class="btn primary" id="termNewBtn" data-i18n="terminal.newSession">+ 新建会话</button>
+          <button class="btn" id="termNewWindowBtn" data-i18n="terminal.newWindow">+ 新建窗口</button>
+        </div>
+        <button class="btn" id="termGridToggle" data-i18n="terminal.gridToggle">⊞ 网格视图</button>
+        <div class="term-list" id="termList"></div>
+      </aside>
+      <div class="term-main" id="termMain">
+        <div class="term-empty" id="termEmpty" data-i18n="terminal.empty">在左侧新建一个会话，可以直接在网页里对话，不用再切到终端软件</div>
+        <div class="term-statusline" id="termStatusline" hidden></div>
+        <div class="term-view" id="termView" hidden></div>
+      </div>
+      <div class="term-grid" id="termGrid" hidden></div>
+    </div>
+  </section>
 </main>
 
 </div><!-- /shell -->
@@ -432,6 +469,8 @@
 </aside>
 <div class="tooltip" id="tooltip"></div>
 
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
 <script src="charts.js"></script>
 <script src="i18n.js"></script>
 <script src="app.js"></script>

@@ -32,6 +32,7 @@ func main() {
 	token := flag.String("token", "", "optional access token (header X-Token or ?token=)")
 	dbPath := flag.String("db", "", "SQLite database path (default ~/.argusbpf/events.db)")
 	rulesPath := flag.String("rules", "", "user rules.json override path (default ~/.argusbpf/rules.json)")
+	enableTerminal := flag.Bool("enable-terminal", false, "enable the PTY-backed web terminal (can spawn real processes from the UI; off by default, strongly recommend pairing with --token)")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -45,7 +46,10 @@ func main() {
 	col := collector.New()
 	defer col.Close()
 
-	srv := server.New(st, re, col.Info(), *token)
+	srv := server.New(st, re, col.Info(), *token, *enableTerminal)
+	if *enableTerminal && *token == "" {
+		log.Println("警告：已启用 --enable-terminal 但未设置 --token，任何能访问此端口的人都可以打开终端 / warning: --enable-terminal is on with no --token set - anyone who can reach this port can open a shell")
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

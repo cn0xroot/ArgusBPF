@@ -18,6 +18,7 @@ import (
 	"argusbpf/internal/rules"
 	"argusbpf/internal/store"
 	"argusbpf/internal/sysinfo"
+	"argusbpf/internal/terminal"
 )
 
 type Server struct {
@@ -28,6 +29,13 @@ type Server struct {
 	info  collector.Info
 	token string
 
+	// term is nil unless --enable-terminal was passed: the PTY-backed web
+	// terminal is a genuinely different trust model than the rest of this
+	// project's read-only observation (it can spawn and drive real
+	// processes), so it defaults off and its routes only exist on the mux
+	// at all when this is non-nil (see Routes).
+	term *terminal.Manager
+
 	startedMs int64
 	selfPID   int
 
@@ -37,11 +45,15 @@ type Server struct {
 	sampler *sysinfo.Sampler
 }
 
-func New(st *store.Store, re *rules.Engine, info collector.Info, token string) *Server {
+func New(st *store.Store, re *rules.Engine, info collector.Info, token string, enableTerminal bool) *Server {
 	hub := NewHub()
+	var term *terminal.Manager
+	if enableTerminal {
+		term = terminal.NewManager()
+	}
 	return &Server{
 		st: st, rules: re, hub: hub, pipe: NewPipeline(st, re, hub),
-		info: info, token: token, startedMs: time.Now().UnixMilli(),
+		info: info, token: token, term: term, startedMs: time.Now().UnixMilli(),
 		selfPID: os.Getpid(), sampler: sysinfo.NewSampler(),
 	}
 }
@@ -104,6 +116,12 @@ func (s *Server) Routes(webFS fs.FS) http.Handler {
 	mux.HandleFunc("GET /api/rules", s.handleRules)
 	mux.HandleFunc("GET /api/glossary", s.handleGlossary)
 	mux.HandleFunc("/ws", s.hub.ServeWS)
+	if s.term != nil {
+		mux.HandleFunc("GET /api/terminal/sessions", s.handleTerminalList)
+		mux.HandleFunc("POST /api/terminal/sessions", s.handleTerminalCreate)
+		mux.HandleFunc("DELETE /api/terminal/sessions/{id}", s.handleTerminalClose)
+		mux.HandleFunc("/ws/terminal/{id}", s.handleTerminalWS)
+	}
 	mux.Handle("/", noStore(http.FileServerFS(webFS)))
 	return s.withToken(mux)
 }

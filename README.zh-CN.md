@@ -69,6 +69,7 @@ ArgusBPF 是一个单文件 Go 二进制程序。在 Linux/amd64 上以 root 运
 - **eCapture 风格的应用层探针**：在 `getaddrinfo`（DNS）、OpenSSL 的 `SSL_read`/`SSL_write`（TLS 明文）、Postgres 的 `exec_simple_query`（SQL 语句）上按需挂载 uprobe；目标库/程序存在时自动挂载，不存在时优雅跳过并在 `/api/info` 中给出提示。
 - **完整的 Web 仪表盘**：总览页（实时 CPU/内存/磁盘/网络曲线）、实时事件表、泳道式时间线（按类别/按进程/按 AI Agent）、网络连接、磁盘 IO（含扇区级散点图）、按进程的内存地图（可视化并逐段解释 `/proc/<pid>/maps`）、进程树、告警页、术语知识库——视觉风格参考 Grafana（深色面板网格、图例、时间范围选择器），但完全自包含，不需要安装真正的 Grafana。
 - **天生跨平台**：纯 Go，无 CGO（SQLite 使用 `modernc.org/sqlite`）。可编译到 darwin/windows/linux 的 amd64/arm64；只有 eBPF 采集器是 linux/amd64 专属的，其余部分到处都能跑。
+- **可选的 PTY 网页终端**（`--enable-terminal`，默认关闭）：直接在仪表盘里开一个真实终端，运行任何东西（AI Agent CLI、shell 都行），支持多会话并发和网格视图同屏查看。这和项目其余部分"纯只读观测"的信任模型完全不同——它能真实起进程、驱动进程——所以特意做成显式开关，而不是仪表盘自带的常规功能。**打开它的话，务必同时设置 `--token`，并保持 `--listen` 绑定在本机（默认就是）或放在你自己的反向代理后面**——任何能连上这个端口的人都能打开一个 shell。
 
 ## 快速开始
 
@@ -91,6 +92,7 @@ open http://127.0.0.1:1024
 | `--token` | *(无)* | 要求请求带 `X-Token` 头 / `?token=` 参数 |
 | `--db` | `~/.argusbpf/events.db` | SQLite 数据库路径 |
 | `--rules` | `~/.argusbpf/rules.json` | 覆盖内置风险规则集 |
+| `--enable-terminal` | `false` | 启用 PTY 网页终端（见上文"功能"一节——打开后记得也设置 `--token`） |
 
 ## 从源码编译 eBPF 程序
 

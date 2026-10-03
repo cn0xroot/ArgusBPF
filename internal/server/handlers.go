@@ -39,6 +39,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"version": "0.1.0", "host": name, "os": osName, "kernel": kernel, "arch": arch,
 		"backend": s.info.Backend, "caps": s.info.Caps, "self_pid": s.selfPID,
 		"started": s.startedMs, "warnings": s.info.Warnings,
+		"terminal_enabled": s.term != nil,
 	})
 }
 

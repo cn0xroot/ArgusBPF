@@ -69,6 +69,7 @@ It's the same idea as tools like [CC-Monitor](https://github.com/) that watch wh
 - **eCapture-style application probes** — best-effort uprobes on `getaddrinfo` (DNS), OpenSSL `SSL_read`/`SSL_write` (TLS plaintext), and Postgres `exec_simple_query` (SQL text), attached automatically when the target library/binary is present; each one degrades gracefully (and says so in `/api/info`) if it isn't.
 - **Full web dashboard** — overview with live CPU/memory/disk/network charts, live event table, swimlane timeline (by category, by process, or by AI agent), network connections, disk IO (including a sector-level scatter plot), per-process memory maps (`/proc/<pid>/maps` visualised and explained region-by-region), a process tree, an alerts view, and a glossary of terms — styled like Grafana (dark panel grid, legends, time-range picker) but self-contained, no Grafana install required.
 - **Cross-platform by design** — pure Go, no CGO (SQLite via `modernc.org/sqlite`). Builds for darwin/windows/linux on amd64/arm64; only the eBPF collector is linux/amd64-specific, everything else runs everywhere.
+- **Optional PTY web terminal** (`--enable-terminal`, off by default) — open a real terminal right in the dashboard and run anything in it (an AI agent CLI, a shell), with multiple concurrent sessions and a grid view to watch several at once. This is a genuinely different trust model from the rest of this read-only tool — it can spawn and drive real processes — which is why it's gated behind an explicit flag and not just the dashboard's own UI. **If you turn it on, also set `--token` and keep `--listen` bound to localhost (the default) or your own reverse proxy** — anyone who can reach the port can open a shell.
 
 ## Supported AI agent CLIs
 
@@ -110,6 +111,7 @@ Useful flags:
 | `--token` | *(none)* | Require `X-Token` header / `?token=` query param |
 | `--db` | `~/.argusbpf/events.db` | SQLite database path |
 | `--rules` | `~/.argusbpf/rules.json` | Override the built-in risk ruleset |
+| `--enable-terminal` | `false` | Enable the PTY web terminal (see Features above — set `--token` too if you turn this on) |
 
 ## Building the eBPF program from source
 
