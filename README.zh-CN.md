@@ -16,6 +16,10 @@ ArgusBPF 是一个单文件 Go 二进制程序。在 Linux/amd64 上以 root 运
 
 ![总览](docs/screenshots/overview-zh.png)
 
+### AI 行为
+
+![AI 行为](docs/screenshots/ai-zh.png)
+
 ### 实时事件
 
 ![实时事件](docs/screenshots/live-zh.png)

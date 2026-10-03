@@ -16,6 +16,10 @@ It's the same idea as tools like [CC-Monitor](https://github.com/) that watch wh
 
 ![Overview](docs/screenshots/overview-en.png)
 
+### AI Activity
+
+![AI Activity](docs/screenshots/ai-en.png)
+
 ### Live Events
 
 ![Live Events](docs/screenshots/live-en.png)
