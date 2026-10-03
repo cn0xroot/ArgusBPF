@@ -101,29 +101,38 @@ func (s *Server) RunPruner(ctx context.Context) {
 
 // Routes returns the HTTP handler: the JSON API, /ws, and the embedded
 // web UI as a catch-all static file server.
+//
+// --token only gates the API/WS routes, not the static files: the HTML/CSS/
+// JS shell carries no data of its own (it fetches everything at runtime
+// through the already-gated API), and index.html has no way to attach
+// ?token= to the <link>/<script> tags the browser then requests on its
+// own - gating them too meant the page itself would load (its own URL
+// has ?token=) but every stylesheet and script it references would 401,
+// leaving a content-less, unstyled shell with nothing functional in it.
 func (s *Server) Routes(webFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/info", s.handleInfo)
-	mux.HandleFunc("GET /api/events", s.handleEvents)
-	mux.HandleFunc("GET /api/stats", s.handleStats)
-	mux.HandleFunc("GET /api/timeline", s.handleTimeline)
-	mux.HandleFunc("GET /api/system", s.handleSystem)
-	mux.HandleFunc("GET /api/system/history", s.handleSystemHistory)
-	mux.HandleFunc("GET /api/processes", s.handleProcesses)
-	mux.HandleFunc("GET /api/process/{pid}", s.handleProcessDetail)
-	mux.HandleFunc("GET /api/connections", s.handleConnections)
-	mux.HandleFunc("GET /api/disk", s.handleDisk)
-	mux.HandleFunc("GET /api/rules", s.handleRules)
-	mux.HandleFunc("GET /api/glossary", s.handleGlossary)
-	mux.HandleFunc("/ws", s.hub.ServeWS)
+	h := func(f http.HandlerFunc) http.Handler { return s.withToken(f) }
+	mux.Handle("GET /api/info", h(s.handleInfo))
+	mux.Handle("GET /api/events", h(s.handleEvents))
+	mux.Handle("GET /api/stats", h(s.handleStats))
+	mux.Handle("GET /api/timeline", h(s.handleTimeline))
+	mux.Handle("GET /api/system", h(s.handleSystem))
+	mux.Handle("GET /api/system/history", h(s.handleSystemHistory))
+	mux.Handle("GET /api/processes", h(s.handleProcesses))
+	mux.Handle("GET /api/process/{pid}", h(s.handleProcessDetail))
+	mux.Handle("GET /api/connections", h(s.handleConnections))
+	mux.Handle("GET /api/disk", h(s.handleDisk))
+	mux.Handle("GET /api/rules", h(s.handleRules))
+	mux.Handle("GET /api/glossary", h(s.handleGlossary))
+	mux.Handle("/ws", h(s.hub.ServeWS))
 	if s.term != nil {
-		mux.HandleFunc("GET /api/terminal/sessions", s.handleTerminalList)
-		mux.HandleFunc("POST /api/terminal/sessions", s.handleTerminalCreate)
-		mux.HandleFunc("DELETE /api/terminal/sessions/{id}", s.handleTerminalClose)
-		mux.HandleFunc("/ws/terminal/{id}", s.handleTerminalWS)
+		mux.Handle("GET /api/terminal/sessions", h(s.handleTerminalList))
+		mux.Handle("POST /api/terminal/sessions", h(s.handleTerminalCreate))
+		mux.Handle("DELETE /api/terminal/sessions/{id}", h(s.handleTerminalClose))
+		mux.Handle("/ws/terminal/{id}", h(s.handleTerminalWS))
 	}
 	mux.Handle("/", noStore(http.FileServerFS(webFS)))
-	return s.withToken(mux)
+	return mux
 }
 
 // noStore disables browser caching for the embedded web UI. It's rebuilt
