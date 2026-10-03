@@ -82,22 +82,37 @@
     for (var k in obj) if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(obj[k]));
     return parts.length ? '?' + parts.join('&') : '';
   }
+  // Every API call silently .catch()es its own errors (a page full of
+  // broken widgets isn't worth crashing over), which meant a 401 - wrong
+  // or missing ?token= - produced no visible symptom at all beyond odd
+  // blank panels, with nothing telling the user why. checkAuth() surfaces
+  // that one specific, actionable case loudly instead; everything else
+  // stays silent-by-design.
+  var authErrorShown = false;
+  function checkAuth(status) {
+    if (status !== 401 || authErrorShown) return;
+    authErrorShown = true;
+    var w = document.getElementById('warnBar');
+    w.textContent = '⚠ ' + I18N.t('auth.invalidToken');
+    w.classList.add('show', 'danger');
+  }
   function api(path, params) {
     return fetch(path + qs(params || {}), { headers: TOKEN ? { 'X-Token': TOKEN } : {} })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+      .then(function (r) { checkAuth(r.status); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
   }
   function apiPost(path, body) {
     var headers = { 'Content-Type': 'application/json' };
     if (TOKEN) headers['X-Token'] = TOKEN;
     return fetch(path, { method: 'POST', headers: headers, body: JSON.stringify(body || {}) })
       .then(function (r) {
+        checkAuth(r.status);
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
         return r.json();
       });
   }
   function apiDelete(path) {
     return fetch(path, { method: 'DELETE', headers: TOKEN ? { 'X-Token': TOKEN } : {} })
-      .then(function (r) { if (!r.ok && r.status !== 204) throw new Error('HTTP ' + r.status); });
+      .then(function (r) { checkAuth(r.status); if (!r.ok && r.status !== 204) throw new Error('HTTP ' + r.status); });
   }
   function isPro() { return state.mode === 'pro'; }
   function debounce(fn, ms) { var t; return function () { clearTimeout(t); var a = arguments; t = setTimeout(function () { fn.apply(null, a); }, ms); }; }
@@ -1162,12 +1177,32 @@
     var s = termSessions.filter(function (x) { return x.id === id; })[0];
     document.getElementById('termStatusline').textContent = (s ? s.cmd : id) + (s && !s.alive ? ' · ' + I18N.t('terminal.ended') : '');
   }
+  // Incremental: adds a cell/connection only for sessions not already
+  // live in the grid, and tears down+removes ones that disappeared,
+  // instead of rebuilding everything every time. This runs on every
+  // sessions-list refresh while in grid mode (loadTermSessions) as well
+  // as right after creating a new session, so a full rebuild would mean
+  // every other pane's connection gets silently dropped and reconnected
+  // (losing nothing permanently - sessions keep their own scrollback -
+  // but disruptive mid-typing, and wasteful).
   function renderTermGrid() {
     var gridEl = document.getElementById('termGrid');
-    gridEl.innerHTML = '';
+    var liveIds = {};
+    termSessions.forEach(function (s) { liveIds[s.id] = true; });
+    Object.keys(termInstances).forEach(function (id) {
+      if (liveIds[id]) return;
+      var inst = termInstances[id];
+      try { inst.ws.close(); } catch (e) {}
+      try { inst.term.dispose(); } catch (e) {}
+      delete termInstances[id];
+      var cell = gridEl.querySelector('[data-session-id="' + id + '"]');
+      if (cell) cell.remove();
+    });
     termSessions.forEach(function (s) {
+      if (termInstances[s.id]) return;
       var cell = document.createElement('div');
       cell.className = 'term-grid-cell';
+      cell.dataset.sessionId = s.id;
       cell.innerHTML = '<div class="term-grid-head"><span class="mono">' + esc(s.cmd) + '</span><span class="dim">' + (s.alive ? '' : esc(I18N.t('terminal.ended'))) + '</span></div><div class="term-grid-body"></div>';
       cell.addEventListener('click', function () {
         document.querySelectorAll('.term-grid-cell').forEach(function (c) { c.classList.remove('focused'); });
@@ -1196,17 +1231,27 @@
     }
     renderTermList();
   }
-  function termCreateSession(cmd, newWindow) {
+  function termCreateSession(cmd, asWindow) {
     apiPost('/api/terminal/sessions', { cmd: cmd }).then(function (info) {
       document.getElementById('termNewCmd').value = '';
       return loadTermSessions().then(function () {
-        if (newWindow) {
-          var url = location.pathname + '?lang=' + I18N.lang() + '&termSession=' + encodeURIComponent(info.id) + '#terminal';
-          window.open(url, '_blank');
-        } else if (!termGridMode) {
-          termSelectSession(info.id);
-        } else {
+        if (asWindow) {
+          // "New window" = another terminal pane alongside whatever's
+          // already open (same idea as a new window/tab in a terminal
+          // app), not a new browser window/tab - switch into grid view
+          // if we aren't already in it, then add this session as one
+          // more pane without disturbing any others already there.
+          if (!termGridMode) {
+            termGridMode = true;
+            document.getElementById('termGridToggle').classList.add('on');
+            termTeardownAll();
+            termCurrentId = null;
+            termShow('grid');
+            renderTermList();
+          }
           renderTermGrid();
+        } else {
+          termSelectSession(info.id);
         }
       });
     }).catch(function (err) { alert(String((err && err.message) || err)); });
@@ -1262,10 +1307,7 @@
       if (PAGE_IDS.indexOf('terminal') === -1) PAGE_IDS.push('terminal');
       wireTerminalUI();
       refreshFns.terminal = function () { loadTermSessions(); };
-      loadTermSessions().then(function () {
-        var want = new URLSearchParams(location.search).get('termSession');
-        if (want && termSessions.some(function (s) { return s.id === want; })) termSelectSession(want);
-      });
+      loadTermSessions();
       if (location.hash === '#terminal') route(); // correct an early overview-redirect from before this resolved
     }).catch(function () {});
   }

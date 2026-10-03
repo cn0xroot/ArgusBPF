@@ -322,6 +322,9 @@
     'terminal.empty': ['在左侧新建一个会话，可以直接在网页里对话，不用再切到终端软件', 'Start a session on the left — you can work right here without switching to a terminal app'],
     'terminal.ended': ['已结束', 'ended'],
 
+    'auth.invalidToken': ['访问被拒绝：token 缺失或不正确，请在网址后加上 ?token=你的token（找服务管理员要，或查看启动日志）',
+      'Access denied: missing or incorrect token — add ?token=<your token> to the URL (ask whoever runs this service, or check its startup log)'],
+
     'cmdclass.git': ['Git 操作', 'Git'],
     'cmdclass.ssh': ['SSH 操作', 'SSH'],
     'cmdclass.filesend': ['文件传输（scp/rsync/nc）', 'File transfer (scp/rsync/nc)'],

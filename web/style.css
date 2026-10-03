@@ -670,6 +670,10 @@ body.mode-pro .plain-only { display: none !important; }
   padding: 7px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; display: none;
 }
 .warn-bar.show { display: block; }
+.warn-bar.danger {
+  background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+}
 
 /* ---------- terminal (PTY web terminal, --enable-terminal only) ---------- */
 .term-shell { display: flex; gap: 14px; height: calc(100vh - 230px); min-height: 420px; }
