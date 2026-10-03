@@ -240,7 +240,8 @@ func scanEvent(rows rowScanner) (*event.Event, error) {
 	return &ev, nil
 }
 
-// Stats summarizes recent activity for /api/stats and the overview page.
+// Stats summarizes recent activity for /api/stats, the overview page, and
+// (with Detail) the per-agent AI-activity page.
 type Stats struct {
 	Total    int64            `json:"total"`
 	ByCat    map[string]int64 `json:"by_cat"`
@@ -249,22 +250,35 @@ type Stats struct {
 	TopProcs []TopProc        `json:"top_procs"`
 	Rate     []int64          `json:"rate"` // events/sec, last 60s
 	Started  int64            `json:"started"`
+
+	// Populated only when Stats is called with detail=true (the AI-activity
+	// page); left nil for the plain overview call so its frequent polling
+	// doesn't pay for queries nothing reads.
+	ByRule   map[string]int64 `json:"by_rule,omitempty"`   // matched rule id -> count
+	CmdClass map[string]int64 `json:"cmd_class,omitempty"` // classifyExe() bucket -> count, from exec events
+	TopHosts []TopHost        `json:"top_hosts,omitempty"` // distinct hosts from connect/dns events
 }
 type TopProc struct {
 	PID  int32  `json:"pid"`
 	Comm string `json:"comm"`
 	N    int64  `json:"count"`
 }
+type TopHost struct {
+	Host string `json:"host"`
+	N    int64  `json:"count"`
+}
 
-// Stats summarizes activity in [sinceMs, untilMs]; either bound may be 0 to
-// leave that side open (0, 0 is "all time", matching the old unscoped
-// behavior). Rate is the one exception - it's always the last 60 real
-// seconds regardless of the window, since it's a live pulse indicator
-// rather than a historical figure.
-func (s *Store) Stats(startedMs, sinceMs, untilMs int64) (Stats, error) {
+// Stats summarizes activity in [sinceMs, untilMs] for one agent id (or every
+// event when agent == ""); either time bound may be 0 to leave that side
+// open, and (0, 0) is "all time", matching the original unscoped behavior.
+// Rate is the one exception to the window - it's always the last 60 real
+// seconds regardless of sinceMs/untilMs, since it's a live pulse indicator
+// rather than a historical figure, and it ignores the agent filter too
+// (it's the top-level "how busy is the box right now" sparkline).
+func (s *Store) Stats(startedMs, sinceMs, untilMs int64, agent string, detail bool) (Stats, error) {
 	st := Stats{ByCat: map[string]int64{}, ByRisk: map[string]int64{}, ByType: map[string]int64{}, Started: startedMs}
 
-	where, args := tsRangeClause(sinceMs, untilMs)
+	where, args := filterClause(sinceMs, untilMs, agent)
 
 	row := s.db.QueryRow("SELECT COUNT(*) FROM events"+where, args...)
 	if err := row.Scan(&st.Total); err != nil {
@@ -284,7 +298,7 @@ func (s *Store) Stats(startedMs, sinceMs, untilMs int64) (Stats, error) {
 	if topSince == 0 {
 		topSince = time.Now().Add(-10 * time.Minute).UnixMilli()
 	}
-	topWhere, topArgs := tsRangeClause(topSince, untilMs)
+	topWhere, topArgs := filterClause(topSince, untilMs, agent)
 	rows, err := s.db.Query(`SELECT pid, comm, COUNT(*) n FROM events`+topWhere+` GROUP BY pid, comm ORDER BY n DESC LIMIT 10`, topArgs...)
 	if err != nil {
 		return st, err
@@ -312,6 +326,64 @@ func (s *Store) Stats(startedMs, sinceMs, untilMs int64) (Stats, error) {
 	}
 	rrows.Close()
 	st.Rate = rate
+
+	if !detail {
+		return st, nil
+	}
+
+	st.ByRule = map[string]int64{}
+	ruleWhere, ruleArgs := filterClause(sinceMs, untilMs, agent)
+	if ruleWhere == "" {
+		ruleWhere = " WHERE rule != ''"
+	} else {
+		ruleWhere += " AND rule != ''"
+	}
+	if err := fillCounts(s.db, "SELECT rule, COUNT(*) FROM events"+ruleWhere+" GROUP BY rule", ruleArgs, st.ByRule); err != nil {
+		return st, err
+	}
+
+	execWhere, execArgs := filterClause(sinceMs, untilMs, agent)
+	if execWhere == "" {
+		execWhere = " WHERE type = 'exec'"
+	} else {
+		execWhere += " AND type = 'exec'"
+	}
+	st.CmdClass = map[string]int64{}
+	erows, err := s.db.Query("SELECT exe, COUNT(*) FROM events"+execWhere+" GROUP BY exe", execArgs...)
+	if err != nil {
+		return st, err
+	}
+	for erows.Next() {
+		var exe string
+		var n int64
+		if erows.Scan(&exe, &n) == nil {
+			if bucket := classifyExe(exe); bucket != "" {
+				st.CmdClass[bucket] += n
+			}
+		}
+	}
+	erows.Close()
+
+	hostWhere, hostArgs := filterClause(sinceMs, untilMs, agent)
+	hostCond := "type IN ('connect','dns')"
+	if hostWhere == "" {
+		hostWhere = " WHERE " + hostCond
+	} else {
+		hostWhere += " AND " + hostCond
+	}
+	hrows, err := s.db.Query(`SELECT COALESCE(json_extract(fields,'$.host'), json_extract(fields,'$.name')) AS host, COUNT(*) n
+		FROM events`+hostWhere+` GROUP BY host HAVING host IS NOT NULL AND host != '' ORDER BY n DESC LIMIT 15`, hostArgs...)
+	if err != nil {
+		return st, err
+	}
+	for hrows.Next() {
+		var th TopHost
+		if hrows.Scan(&th.Host, &th.N) == nil {
+			st.TopHosts = append(st.TopHosts, th)
+		}
+	}
+	hrows.Close()
+
 	return st, nil
 }
 
@@ -328,6 +400,62 @@ func tsRangeClause(sinceMs, untilMs int64) (string, []any) {
 		return " WHERE ts <= ?", []any{untilMs}
 	default:
 		return "", nil
+	}
+}
+
+// filterClause extends tsRangeClause with an optional exact `agent` match,
+// ANDed in when agent is non-empty.
+func filterClause(sinceMs, untilMs int64, agent string) (string, []any) {
+	where, args := tsRangeClause(sinceMs, untilMs)
+	if agent == "" {
+		return where, args
+	}
+	if where == "" {
+		return " WHERE agent = ?", []any{agent}
+	}
+	return where + " AND agent = ?", append(args, agent)
+}
+
+// classifyExe buckets an exec()'d path by the shape of CLI tooling it
+// represents, the same idea as CC-Monitor's command-pattern rules but
+// matched against the actual resolved executable (from the exec() syscall
+// itself) rather than a regex over a shell command string.
+func classifyExe(path string) string {
+	name := path
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	switch name {
+	case "git", "gh":
+		return "git"
+	case "ssh", "sftp", "ssh-keygen", "ssh-copy-id", "ssh-add":
+		return "ssh"
+	case "scp", "rsync", "nc", "ncat", "netcat":
+		return "filesend"
+	case "docker", "docker-compose", "podman", "nerdctl", "containerd", "runc":
+		return "docker"
+	case "curl", "wget", "aria2c":
+		return "download"
+	case "tar", "zip", "unzip", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz", "7z", "7za", "rar", "unrar":
+		return "archive"
+	case "ping", "ping6", "traceroute", "tracepath", "nmap", "dig", "nslookup", "host", "mtr":
+		return "netdiag"
+	case "nohup", "screen", "tmux", "setsid", "disown", "at", "systemd-run":
+		return "procbg"
+	case "pip", "pip3":
+		return "install_pip"
+	case "uv":
+		return "install_uv"
+	case "npm", "yarn", "pnpm", "bun":
+		return "install_js"
+	case "apt", "apt-get", "yum", "dnf", "pacman", "brew", "port", "apk", "zypper", "dpkg", "rpm":
+		return "install_system"
+	case "rustup", "cargo", "nvm", "pyenv", "rbenv", "sdk", "go", "gvm":
+		return "install_toolchain"
+	case "ida", "ida64", "ghidra", "r2", "radare2", "gdb", "objdump", "readelf", "nm":
+		return "reverseeng"
+	default:
+		return ""
 	}
 }
 

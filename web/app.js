@@ -291,6 +291,8 @@
       document.querySelectorAll('thead.evhead').forEach(function (h) { h.innerHTML = evHeadHTML(); });
       if (glossaryRebuildCats) glossaryRebuildCats();
       if (glossaryRender) glossaryRender();
+      var aiAllOpt = document.querySelector('#aiAgentSel option[value=""]');
+      if (aiAllOpt) aiAllOpt.textContent = I18N.t('ai.agentAll');
       renderOverviewAlerts();
       repaintDot();
       // Chart series labels are set once at construction (initOverview),
@@ -343,7 +345,7 @@
     window.addEventListener('hashchange', route);
   }
 
-  var PAGE_IDS = ['overview', 'live', 'timeline', 'net', 'disk', 'mem', 'proc', 'alerts', 'glossary'];
+  var PAGE_IDS = ['overview', 'ai', 'live', 'timeline', 'net', 'disk', 'mem', 'proc', 'alerts', 'glossary'];
   var refreshFns = {};
   function route() {
     var page = (location.hash || '#overview').slice(1);
@@ -563,6 +565,93 @@
   function cardHTML(c) {
     var icon = c.icon ? '<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICONS[c.icon] + '</svg></div>' : '';
     return '<div class="card" style="--c:' + c.c + '">' + icon + '<div class="label">' + c.label + '</div><div class="value">' + c.value + '</div></div>';
+  }
+  // Shared bar-list row renderer for the stat breakdowns on Overview and
+  // the AI-activity page (by-cat/by-risk/by-type/rules/cmd-class/hosts all
+  // reduce to "label, count, bar relative to the top entry").
+  function barListHTML(items, emptyKey) {
+    if (!items.length) return '<div class="empty">' + I18N.t(emptyKey || 'empty.noData') + '</div>';
+    var maxN = Math.max(1, items[0].count);
+    return items.map(function (it) {
+      return '<div class="list-item"><span class="grow">' + it.label + '</span>' +
+        '<div class="bar-bg" style="width:80px"><div class="bar-fg" style="width:' + (100 * it.count / maxN) + '%"></div></div>' +
+        '<span class="dim" style="width:40px;text-align:right">' + it.count + '</span></div>';
+    }).join('');
+  }
+  function mapToSortedItems(m, labelFn) {
+    return Object.keys(m || {}).map(function (k) { return { label: labelFn(k), count: m[k] }; })
+      .sort(function (a, b) { return b.count - a.count; });
+  }
+  var CMD_CLASS_LABELS = {
+    git: 'cmdclass.git', ssh: 'cmdclass.ssh', filesend: 'cmdclass.filesend', docker: 'cmdclass.docker',
+    download: 'cmdclass.download', archive: 'cmdclass.archive', netdiag: 'cmdclass.netdiag', procbg: 'cmdclass.procbg',
+    install_pip: 'cmdclass.installPip', install_uv: 'cmdclass.installUv', install_js: 'cmdclass.installJs',
+    install_system: 'cmdclass.installSystem', install_toolchain: 'cmdclass.installToolchain', reverseeng: 'cmdclass.reverseeng',
+  };
+  function cmdClassLabel(k) { var key = CMD_CLASS_LABELS[k]; return key ? I18N.t(key) : k; }
+
+  // ---------------- AI ACTIVITY ----------------
+  // AI_AGENTS mirrors internal/agents/agents.go's id/display table; kept as
+  // a small static list here rather than fetched, since it's part of the
+  // UI chrome (the filter dropdown) and changes exactly as often as that
+  // Go table does.
+  var AI_AGENTS = [
+    ['claude-code', 'Claude Code'], ['codex', 'Codex CLI'], ['cursor', 'Cursor'],
+    ['gemini-cli', 'Gemini CLI'], ['grok-cli', 'Grok CLI'], ['aider', 'Aider'],
+    ['opencode', 'OpenCode'], ['zcode', 'ZCode'], ['openclacky', 'OpenClacky'],
+    ['antigravity-cli', 'Antigravity CLI'],
+  ];
+  var aiRulesCache = null; // id -> {title, title_en, risk}, fetched once
+  function initAI() {
+    var sel = document.getElementById('aiAgentSel');
+    sel.innerHTML = '<option value="">' + esc(I18N.t('ai.agentAll')) + '</option>' +
+      AI_AGENTS.map(function (a) { return '<option value="' + a[0] + '">' + esc(a[1]) + '</option>'; }).join('');
+    sel.addEventListener('change', loadAI);
+    document.getElementById('aiRefresh').addEventListener('click', loadAI);
+    refreshFns.ai = loadAI;
+    loadAI();
+  }
+  function loadAI() {
+    var agent = document.getElementById('aiAgentSel').value;
+    var params = rangeParams(); params.detail = 1; if (agent) params.agent = agent;
+    var rulesReady = aiRulesCache ? Promise.resolve(aiRulesCache) : api('/api/rules').then(function (r) {
+      aiRulesCache = {};
+      (r.rules || []).forEach(function (ru) { aiRulesCache[ru.id] = ru; });
+      return aiRulesCache;
+    }).catch(function () { return {}; });
+    Promise.all([api('/api/stats', params), rulesReady]).then(function (res) {
+      var st = res[0], rules = res[1] || {};
+      var hostsTotal = (st.top_hosts || []).length;
+      var cmdTotal = Object.keys(st.cmd_class || {}).reduce(function (a, k) { return a + st.cmd_class[k]; }, 0);
+      var cards = [
+        { label: I18N.t('card.totalEvents'), value: st.total || 0, c: 'var(--accent)', icon: 'pulse' },
+        { label: I18N.t('card.highRisk'), value: (st.by_risk && st.by_risk.high) || 0, c: 'var(--red)', icon: 'alertTriangle' },
+        { label: I18N.t('card.mediumRisk'), value: (st.by_risk && st.by_risk.medium) || 0, c: 'var(--yellow)', icon: 'alertCircle' },
+        { label: I18N.t('ai.card.hosts'), value: hostsTotal, c: 'var(--cyan)', icon: 'globe' },
+        { label: I18N.t('ai.card.cmds'), value: cmdTotal, c: 'var(--green)', icon: 'radio' },
+      ];
+      document.getElementById('aiCards').innerHTML = cards.map(cardHTML).join('');
+
+      document.getElementById('aiByCat').innerHTML = barListHTML(mapToSortedItems(st.by_cat, catLabel));
+      document.getElementById('aiByRisk').innerHTML = barListHTML(mapToSortedItems(st.by_risk, riskLabel));
+      document.getElementById('aiByType').innerHTML = barListHTML(mapToSortedItems(st.by_type, function (k) { return k; }));
+
+      document.getElementById('aiRules').innerHTML = barListHTML(mapToSortedItems(st.by_rule, function (id) {
+        var ru = rules[id];
+        return ru ? esc(evText(ru, 'title')) : esc(id);
+      }));
+      document.getElementById('aiCmdClass').innerHTML = barListHTML(mapToSortedItems(st.cmd_class, function (k) { return esc(cmdClassLabel(k)); }));
+
+      document.getElementById('aiHosts').innerHTML = barListHTML((st.top_hosts || []).map(function (h) { return { label: esc(h.host), count: h.count }; }), 'empty.noConnections');
+
+      var top = (st.top_procs || []);
+      var maxN = Math.max(1, top[0] ? top[0].count : 1);
+      document.getElementById('aiTopProcs').innerHTML = top.length ? top.map(function (p) {
+        return '<div class="list-item"><span class="grow">' + esc(p.comm) + ' <span class="dim">#' + p.pid + '</span></span>' +
+          '<div class="bar-bg" style="width:80px"><div class="bar-fg" style="width:' + (100 * p.count / maxN) + '%"></div></div>' +
+          '<span class="dim" style="width:34px;text-align:right">' + p.count + '</span></div>';
+      }).join('') : '<div class="empty">' + I18N.t('empty.noData') + '</div>';
+    }).catch(function () {});
   }
 
   // ---------------- LIVE ----------------
@@ -964,6 +1053,7 @@
   function init() {
     initChrome();
     initOverview();
+    initAI();
     initLive();
     initTimeline();
     initNet();

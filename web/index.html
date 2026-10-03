@@ -25,6 +25,7 @@
   </a>
   <nav class="nav" id="nav">
     <a href="#overview" data-page="overview" data-i18n-title="nav.overview"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg></i><span data-i18n="nav.overview">总览</span></a>
+    <a href="#ai" data-page="ai" data-i18n-title="nav.ai"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="11" rx="2.5"/><circle cx="9.5" cy="13.5" r="1.3"/><circle cx="14.5" cy="13.5" r="1.3"/><path d="M12 8V5M9 5h6M3 12v3M21 12v3"/></svg></i><span data-i18n="nav.ai">AI 行为</span></a>
     <a href="#live" data-page="live" data-i18n-title="nav.live"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg></i><span data-i18n="nav.live">实时事件</span></a>
     <a href="#timeline" data-page="timeline" data-i18n-title="nav.timeline"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18M3 12h18M3 19h12"/></svg></i><span data-i18n="nav.timeline">时间线</span></a>
     <a href="#net" data-page="net" data-i18n-title="nav.net"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M7 7.3 10.3 16M17 7.3 13.7 16"/></svg></i><span data-i18n="nav.net">网络</span></a>
@@ -121,6 +122,56 @@
       <div class="panel">
         <h3 class="panel-header"><span><span class="plain-only" data-i18n="ov.alerts.plain">最近值得注意的动作</span><span class="pro-only" data-i18n="ov.alerts.pro">最近中/高风险事件</span></span><a href="#alerts" class="big-num" data-i18n="ov.alerts.all">全部 →</a></h3>
         <div class="list" id="ovAlerts"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ AI 行为 ============ -->
+  <section class="page" id="page-ai">
+    <div class="page-head">
+      <div>
+        <h1 data-i18n="ai.title">AI 行为</h1>
+        <p class="page-intro plain-only" data-i18n="ai.intro.plain">看某一个 AI 编码 Agent（或者全部 Agent 加起来）在这台电脑上到底做了什么：碰了哪些文件、连了哪些网址、跑了哪些命令、踩中了哪些风险规则。</p>
+        <p class="page-intro pro-only" data-i18n="ai.intro.pro">按 agent 字段过滤的事件统计：分类/风险/类型分布、命中的规则、exec 命令分类、联网目标、Top 进程。</p>
+      </div>
+      <div class="toolbar">
+        <select class="input" id="aiAgentSel"></select>
+        <button class="btn" id="aiRefresh" data-i18n="common.refresh">刷新</button>
+      </div>
+    </div>
+    <div class="grid cards" id="aiCards"></div>
+    <div class="grid three mt">
+      <div class="panel">
+        <h3 class="panel-header"><span data-i18n="ai.byCat">按类别分布</span></h3>
+        <div class="list" id="aiByCat"></div>
+      </div>
+      <div class="panel">
+        <h3 class="panel-header"><span data-i18n="ai.byRisk">按风险等级分布</span></h3>
+        <div class="list" id="aiByRisk"></div>
+      </div>
+      <div class="panel">
+        <h3 class="panel-header"><span data-i18n="ai.byType">按事件类型分布</span></h3>
+        <div class="list" id="aiByType"></div>
+      </div>
+    </div>
+    <div class="grid two mt">
+      <div class="panel">
+        <h3 class="panel-header"><span data-i18n="ai.rules">命中的安全规则</span></h3>
+        <div class="list" id="aiRules"></div>
+      </div>
+      <div class="panel">
+        <h3 class="panel-header"><span data-i18n="ai.cmdClass">命令行为分类</span></h3>
+        <div class="list" id="aiCmdClass"></div>
+      </div>
+    </div>
+    <div class="grid two mt">
+      <div class="panel">
+        <h3 class="panel-header"><span data-i18n="ai.hosts">联网足迹（Top 目标）</span></h3>
+        <div class="list" id="aiHosts"></div>
+      </div>
+      <div class="panel">
+        <h3 class="panel-header"><span data-i18n="ai.topProcs">最活跃进程</span></h3>
+        <div class="list" id="aiTopProcs"></div>
       </div>
     </div>
   </section>

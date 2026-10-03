@@ -62,7 +62,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	st, err := s.st.Stats(s.startedMs, qInt64(r, "since", 0), qInt64(r, "until", 0))
+	detail := r.URL.Query().Get("detail") == "1"
+	st, err := s.st.Stats(s.startedMs, qInt64(r, "since", 0), qInt64(r, "until", 0), r.URL.Query().Get("agent"), detail)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
