@@ -129,6 +129,19 @@
 | `GET /api/rules` / `GET /api/glossary` | 规则 / 知识库 |
 | `WS /ws` | 推送 `{"t":"events","d":[Event...]}`（≤200ms 合包）与 `{"t":"sys","d":Snapshot}`（1s） |
 
+## 7b. MCP 服务（internal/mcpserver，`--mcp`）
+
+这是一个独立的运行模式，不是 HTTP 服务上多加的一条路由：`--mcp` 让程序作为一个 [Model Context Protocol](https://modelcontextprotocol.io/) stdio 服务运行，不启动采集器也不起仪表盘，交给 AI 客户端（Claude Code、Claude Desktop 等）按协议标准的 stdio 方式当子进程启动。基于官方的 `github.com/modelcontextprotocol/go-sdk` 构建。
+
+它对仪表盘守护进程写入的同一个 SQLite 文件调用 `store.OpenReadOnly`（`mode=ro`，不跑迁移——这个进程结构上就不可能写进去），而不是走 HTTP 代理：每条存入的事件在入库时就已经带上了规则匹配结果和双语解释，所以直接读数据库拿到的数据和仪表盘完全一致，不需要这个进程跑 root、开端口、或者知道 `--token`。`hardware_info`/`busybox_applets` 完全不碰数据库（通过 gopsutil / `exec.Command` 直接读当前机器），即使仪表盘从没启动过也能用；`recent_events`/`event_stats` 则需要数据库已经存在。
+
+| 工具 | 返回内容 |
+|---|---|
+| `hardware_info` | CPU 型号/核心数/使用率、内存、磁盘分区（容量+占用，已过滤 `squashfs`）、主机/内核/开机时长 |
+| `busybox_applets` | 探测 busybox 二进制（常见路径，然后找 `PATH`），通过 `--list` 列出它提供的所有应用程序 |
+| `recent_events` | 带过滤条件的事件查询（类别/风险/Agent/时间窗口），字段和 UI 一样双语（优先英文） |
+| `event_stats` | 某个时间窗口内按类别/风险/类型的汇总统计 + 最活跃进程 |
+
 ## 8. 跨平台策略
 
 - `collector_linux.go`：有 root + BTF → eBPF；否则降级 Poller。
@@ -137,6 +150,8 @@
 
 ## 9. 安全 / 性能
 
-- 默认只监听 `127.0.0.1:1024`，`--listen` 可改；可选 `--token` 访问令牌。
+- 默认只监听 `127.0.0.1:1024`，`--listen` 可改；可选 `--token` 访问令牌。`--token` 只保护 API/WebSocket 接口，不保护内嵌的静态文件（它们本身不带任何数据，而且 index.html 没法给浏览器自己请求的 `<link>`/`<script>` 标签附加上 `?token=`）。绑定非本机地址时启动会打印安全警告。
+- `--enable-terminal`（默认关闭）和项目其余部分"纯只读观测"是完全不同的信任模型——它是能真实起进程、驱动进程的 PTY 网页终端——所以做成显式开关，不开启时相关路由在服务端压根不存在，开启但没配 `--token` 时启动会警告。
+- MCP 服务（`--mcp`，见 §7b）结构上就是只读的（`mode=ro`），也完全不共享仪表盘的 `--token`/`--listen` 这套访问控制——它从不开端口，谁能启动这个二进制谁就能用它，访问控制落在"谁能启动这个程序"这一层。
 - 过滤自身 PID 防止反馈环；read/write/缺页/块 IO 内核侧计数 + 用户态 1s 合并，避免事件风暴。
 - SQLite 批量事务写入，按条数/天数自动清理（默认 50 万条 / 7 天）。

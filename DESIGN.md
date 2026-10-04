@@ -135,6 +135,19 @@ Global toolbar toggles: **Professional / Plain-language** mode (affects table co
 | `GET /api/rules` / `GET /api/glossary` | Rules / glossary |
 | `WS /ws` | Pushes `{"t":"events","d":[Event...]}` (batched, ≤200ms) and `{"t":"sys","d":Snapshot}` (1s) |
 
+## 7b. MCP server (internal/mcpserver, `--mcp`)
+
+A separate run mode, not another route on the HTTP server: `--mcp` makes the binary act as a [Model Context Protocol](https://modelcontextprotocol.io/) stdio server instead of starting the collector or the dashboard, for an AI client (Claude Code, Claude Desktop, ...) to spawn as a subprocess per the protocol's normal stdio transport. Built on the official `github.com/modelcontextprotocol/go-sdk`.
+
+It calls `store.OpenReadOnly` on the same SQLite file the dashboard daemon writes to (`mode=ro`, no migrations - this process cannot write to it even by accident) rather than proxying over HTTP: every stored event already carries its rule match and bilingual explanation from ingest time, so reading the database directly gets identical data to the dashboard with no need for this process to run as root, bind a port, or know a `--token`. `hardware_info`/`busybox_applets` don't touch the database at all (gathered live via gopsutil / `exec.Command`), so they work even if the dashboard has never been started; `recent_events`/`event_stats` need the database to already exist.
+
+| Tool | Returns |
+|---|---|
+| `hardware_info` | CPU model/cores/usage, memory, disk partitions (capacity + usage, `squashfs` filtered out), host/kernel/uptime |
+| `busybox_applets` | Detects a BusyBox binary (common paths, then `PATH`) and lists its applets via `--list` |
+| `recent_events` | Filtered event query (category/risk/agent/time window), same bilingual fields as the UI (English preferred) |
+| `event_stats` | Totals by category/risk/type + top processes, over a trailing time window |
+
 ## 8. Cross-platform strategy
 
 - `collector_linux.go`: root + BTF available → eBPF; otherwise falls back to the Poller.
@@ -143,6 +156,8 @@ Global toolbar toggles: **Professional / Plain-language** mode (affects table co
 
 ## 9. Security / performance
 
-- Listens only on `127.0.0.1:1024` by default, changeable via `--listen`; an optional `--token` access token.
+- Listens only on `127.0.0.1:1024` by default, changeable via `--listen`; an optional `--token` access token. `--token` gates the API/WebSocket routes only, not the embedded static files (they carry no data of their own and index.html has no way to attach `?token=` to the `<link>`/`<script>` tags the browser requests on its own). Binding a non-loopback address logs a startup warning.
+- `--enable-terminal` (off by default) is a different trust model from the rest of this read-only tool - a PTY-backed web terminal that can spawn and drive real processes - so it's gated behind an explicit flag, its routes don't exist on the mux at all unless enabled, and the binary warns at startup if it's on with no `--token` set.
+- The MCP server (`--mcp`, see §7b) is read-only by construction (`mode=ro`) and doesn't share the dashboard's `--token`/`--listen` surface at all - it never binds a port, so its own access control is whatever controls who can spawn the binary in the first place.
 - Filters out its own PID to avoid a feedback loop; read/write/pagefault/block-IO counting happens kernel-side with a 1s user-space merge to avoid an event storm.
 - SQLite writes happen in batched transactions, with automatic cleanup by row count/age (defaults: 500,000 rows / 7 days).
