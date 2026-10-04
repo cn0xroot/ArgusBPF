@@ -70,6 +70,7 @@ ArgusBPF 是一个单文件 Go 二进制程序。在 Linux/amd64 上以 root 运
 - **完整的 Web 仪表盘**：总览页（实时 CPU/内存/磁盘/网络曲线）、实时事件表、泳道式时间线（按类别/按进程/按 AI Agent）、网络连接、磁盘 IO（含扇区级散点图）、按进程的内存地图（可视化并逐段解释 `/proc/<pid>/maps`）、进程树、告警页、术语知识库——视觉风格参考 Grafana（深色面板网格、图例、时间范围选择器），但完全自包含，不需要安装真正的 Grafana。
 - **天生跨平台**：纯 Go，无 CGO（SQLite 使用 `modernc.org/sqlite`）。可编译到 darwin/windows/linux 的 amd64/arm64；只有 eBPF 采集器是 linux/amd64 专属的，其余部分到处都能跑。
 - **可选的 PTY 网页终端**（`--enable-terminal`，默认关闭）：直接在仪表盘里开一个真实终端，运行任何东西（AI Agent CLI、shell 都行），支持多会话并发和网格视图同屏查看。这和项目其余部分"纯只读观测"的信任模型完全不同——它能真实起进程、驱动进程——所以特意做成显式开关，而不是仪表盘自带的常规功能。**打开它的话，务必同时设置 `--token`，并保持 `--listen` 绑定在本机（默认就是）或放在你自己的反向代理后面**——任何能连上这个端口的人都能打开一个 shell。
+- **给 AI 用的 MCP 服务**（`--mcp`）：运行 `argusbpf --mcp` 作为一个 [Model Context Protocol](https://modelcontextprotocol.io/) stdio 服务，让 AI 助手（Claude Code、Claude Desktop、任何 MCP 客户端）能直接查询这台机器：`hardware_info`（CPU/内存/磁盘/主机信息）、`busybox_applets`（busybox 实际提供了哪些命令，在嵌入式/车机这种 `/bin` 大半是指向 busybox 的软链接的系统上很有用）、`recent_events` 和 `event_stats`（和仪表盘展示的是同一份采集到的活动数据，可按类别/风险/Agent/时间窗口过滤）。它只读仪表盘自己的 SQLite 数据库，不需要 root、不开端口、也不需要 `--token`——用法见下文[使用 MCP 服务](#使用-mcp-服务)。
 
 ## 快速开始
 
@@ -93,6 +94,32 @@ open http://127.0.0.1:1024
 | `--db` | `~/.argusbpf/events.db` | SQLite 数据库路径 |
 | `--rules` | `~/.argusbpf/rules.json` | 覆盖内置风险规则集 |
 | `--enable-terminal` | `false` | 启用 PTY 网页终端（见上文"功能"一节——打开后记得也设置 `--token`） |
+| `--mcp` | `false` | 以 MCP stdio 服务模式运行，代替网页仪表盘（见下文[使用 MCP 服务](#使用-mcp-服务)） |
+
+## 使用 MCP 服务
+
+`argusbpf --mcp` 会作为一个独立的 [MCP](https://modelcontextprotocol.io/) stdio 服务运行，而不是跑仪表盘——它读取仪表盘写入的同一个 SQLite 数据库（如果用了非默认路径就传同样的 `--db`），对外提供四个工具：`hardware_info`、`busybox_applets`、`recent_events`、`event_stats`。不需要 root、不开网络端口、也不需要 `--token`——MCP 客户端会按协议的标准 stdio 方式把它当成一个短生命周期的子进程来启动。
+
+Claude Code 里直接加：
+
+```sh
+claude mcp add argusbpf -- /usr/local/bin/argusbpf --mcp
+```
+
+或者直接写配置（Claude Code 的 `.mcp.json`、Claude Desktop 的 `claude_desktop_config.json`，或任何其它 MCP 客户端）：
+
+```json
+{
+  "mcpServers": {
+    "argusbpf": {
+      "command": "/usr/local/bin/argusbpf",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+如果仪表盘用了非默认的 `--db` 路径，这里也要传同一个（`"args": ["--mcp", "--db", "/path/to/events.db"]`），MCP 服务才能读到正确的文件。`hardware_info`/`busybox_applets` 不依赖仪表盘运行（直接读当前这台机器），但 `recent_events`/`event_stats` 需要数据库已经存在，也就是说仪表盘得至少跑起来过一次。
 
 ## 从源码编译 eBPF 程序
 

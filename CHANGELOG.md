@@ -5,6 +5,11 @@
 All notable changes to ArgusBPF are documented here. Dates are when the
 work landed on `master`, not necessarily a tagged release.
 
+## [Unreleased]
+
+### Added
+- **MCP server** (`--mcp`) — runs as a [Model Context Protocol](https://modelcontextprotocol.io/) stdio server instead of the dashboard, exposing four read-only tools to AI clients: `hardware_info` (CPU/memory/disk/host, gathered live via gopsutil), `busybox_applets` (detects and lists BusyBox's provided commands — useful on embedded/automotive images), `recent_events` and `event_stats` (the dashboard's own captured activity, filterable by category/risk/agent/time window). Reads the dashboard's SQLite database directly (new `store.OpenReadOnly`) rather than proxying over HTTP, so it needs no root, no open port, and no `--token`. Built on the official `github.com/modelcontextprotocol/go-sdk`.
+
 ## [1.1] - 2026-10-02
 
 ### Added

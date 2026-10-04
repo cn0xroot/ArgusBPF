@@ -70,6 +70,7 @@ It's the same idea as tools like [CC-Monitor](https://github.com/) that watch wh
 - **Full web dashboard** — overview with live CPU/memory/disk/network charts, live event table, swimlane timeline (by category, by process, or by AI agent), network connections, disk IO (including a sector-level scatter plot), per-process memory maps (`/proc/<pid>/maps` visualised and explained region-by-region), a process tree, an alerts view, and a glossary of terms — styled like Grafana (dark panel grid, legends, time-range picker) but self-contained, no Grafana install required.
 - **Cross-platform by design** — pure Go, no CGO (SQLite via `modernc.org/sqlite`). Builds for darwin/windows/linux on amd64/arm64; only the eBPF collector is linux/amd64-specific, everything else runs everywhere.
 - **Optional PTY web terminal** (`--enable-terminal`, off by default) — open a real terminal right in the dashboard and run anything in it (an AI agent CLI, a shell), with multiple concurrent sessions and a grid view to watch several at once. This is a genuinely different trust model from the rest of this read-only tool — it can spawn and drive real processes — which is why it's gated behind an explicit flag and not just the dashboard's own UI. **If you turn it on, also set `--token` and keep `--listen` bound to localhost (the default) or your own reverse proxy** — anyone who can reach the port can open a shell.
+- **MCP server for AI clients** (`--mcp`) — run `argusbpf --mcp` as a [Model Context Protocol](https://modelcontextprotocol.io/) stdio server so an AI assistant (Claude Code, Claude Desktop, any MCP client) can query this machine directly: `hardware_info` (CPU/memory/disk/host), `busybox_applets` (what BusyBox actually provides, useful on embedded/automotive images where most of `/bin` is one BusyBox binary), `recent_events` and `event_stats` (the same captured activity the dashboard shows, filterable by category/risk/agent/time window). It reads the dashboard's own SQLite database read-only, so it needs no root, no open port, and no `--token` — see [Using the MCP server](#using-the-mcp-server) below.
 
 ## Supported AI agent CLIs
 
@@ -112,6 +113,32 @@ Useful flags:
 | `--db` | `~/.argusbpf/events.db` | SQLite database path |
 | `--rules` | `~/.argusbpf/rules.json` | Override the built-in risk ruleset |
 | `--enable-terminal` | `false` | Enable the PTY web terminal (see Features above — set `--token` too if you turn this on) |
+| `--mcp` | `false` | Run as an MCP stdio server instead of the web dashboard (see [Using the MCP server](#using-the-mcp-server)) |
+
+## Using the MCP server
+
+`argusbpf --mcp` runs as a standalone [MCP](https://modelcontextprotocol.io/) stdio server instead of the dashboard — it reads the same SQLite database the dashboard writes to (`--db` if you're using a non-default path) and exposes four tools: `hardware_info`, `busybox_applets`, `recent_events`, `event_stats`. It doesn't need root, doesn't open a network port, and doesn't need `--token` — a client spawns it as a short-lived subprocess per the protocol's normal stdio transport.
+
+For Claude Code, add it with:
+
+```sh
+claude mcp add argusbpf -- /usr/local/bin/argusbpf --mcp
+```
+
+Or configure it directly (Claude Code's `.mcp.json`, Claude Desktop's `claude_desktop_config.json`, or any other MCP client):
+
+```json
+{
+  "mcpServers": {
+    "argusbpf": {
+      "command": "/usr/local/bin/argusbpf",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+If the dashboard uses a non-default `--db` path, pass the same one here (`"args": ["--mcp", "--db", "/path/to/events.db"]`) so the MCP server reads the right file. The dashboard doesn't need to be running for `hardware_info`/`busybox_applets` to work (they read the live machine directly); `recent_events`/`event_stats` need the database to already exist, which means the dashboard has to have run at least once.
 
 ## Building the eBPF program from source
 

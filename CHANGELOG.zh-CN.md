@@ -4,6 +4,11 @@
 
 记录 ArgusBPF 所有值得一提的变化。日期是改动落到 `master` 的时间，不一定对应打了标签的发布版本。
 
+## [未发布]
+
+### 新增
+- **MCP 服务**（`--mcp`）：作为一个 [Model Context Protocol](https://modelcontextprotocol.io/) stdio 服务运行，代替网页仪表盘，给 AI 客户端提供四个只读工具：`hardware_info`（CPU/内存/磁盘/主机信息，通过 gopsutil 实时采集）、`busybox_applets`（检测并列出 busybox 实际提供的命令——在嵌入式/车机镜像上很有用）、`recent_events` 和 `event_stats`（仪表盘自己采集的活动数据，可按类别/风险/Agent/时间窗口过滤）。直接读取仪表盘的 SQLite 数据库（新增 `store.OpenReadOnly`），不走 HTTP 代理，所以不需要 root、不开端口、也不需要 `--token`。基于官方的 `github.com/modelcontextprotocol/go-sdk` 构建。
+
 ## [1.1] - 2026-10-02
 
 ### 新增

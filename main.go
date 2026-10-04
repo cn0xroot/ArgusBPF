@@ -3,6 +3,9 @@
 // activity (via eBPF on Linux/amd64 as root, falling back to a polling
 // collector everywhere else) and serves a dashboard with both a
 // professional and a plain-language view of what it sees.
+//
+// With --mcp, it instead runs as an MCP stdio server (see
+// internal/mcpserver) exposing that same captured state to AI clients.
 package main
 
 import (
@@ -20,6 +23,7 @@ import (
 	"time"
 
 	"argusbpf/internal/collector"
+	"argusbpf/internal/mcpserver"
 	"argusbpf/internal/rules"
 	"argusbpf/internal/server"
 	"argusbpf/internal/store"
@@ -54,7 +58,22 @@ func main() {
 	dbPath := flag.String("db", "", "SQLite database path (default ~/.argusbpf/events.db)")
 	rulesPath := flag.String("rules", "", "user rules.json override path (default ~/.argusbpf/rules.json)")
 	enableTerminal := flag.Bool("enable-terminal", false, "enable the PTY-backed web terminal (can spawn real processes from the UI; off by default, strongly recommend pairing with --token)")
+	runMCP := flag.Bool("mcp", false, "run as an MCP (Model Context Protocol) stdio server exposing hardware info, BusyBox applets, and recent events as tools for an AI client, instead of the web dashboard")
 	flag.Parse()
+
+	if *runMCP {
+		// A separate, lightweight mode: an MCP client (an AI assistant)
+		// spawns this as a stdio subprocess per-request, so it must not
+		// also try to bind the HTTP port or start the eBPF collector -
+		// it only reads the database the long-running dashboard instance
+		// (if any) already writes to. See internal/mcpserver.
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if err := mcpserver.Run(ctx, *dbPath); err != nil {
+			log.Fatalf("mcp server: %v", err)
+		}
+		return
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {

@@ -23,15 +23,21 @@ type Store struct {
 
 // Open creates/opens the SQLite database at path (default
 // ~/.argusbpf/events.db) and ensures the schema exists.
+// defaultPath returns ~/.argusbpf/events.db, creating the directory (but
+// not the file) if needed.
+func defaultPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	dir := filepath.Join(home, ".argusbpf")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "events.db")
+}
+
 func Open(path string) (*Store, error) {
 	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "."
-		}
-		dir := filepath.Join(home, ".argusbpf")
-		_ = os.MkdirAll(dir, 0o755)
-		path = filepath.Join(dir, "events.db")
+		path = defaultPath()
 	}
 	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
 	if err != nil {
@@ -43,6 +49,22 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenReadOnly opens an existing database without creating it or running
+// migrations, for tools that only ever query a database the main daemon
+// already owns and writes to (the MCP server, see internal/mcpserver) -
+// SQLite's WAL mode already makes a read-only connection from a second
+// process safe to use concurrently with the daemon's writer.
+func OpenReadOnly(path string) (*Store, error) {
+	if path == "" {
+		path = defaultPath()
+	}
+	db, err := sql.Open("sqlite", path+"?mode=ro&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
